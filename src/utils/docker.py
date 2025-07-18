@@ -1,124 +1,125 @@
-"""Utilities for working with Ollama models in Docker environments"""
+"""在Docker环境中使用Ollama模型的工具"""
 
 import requests
 import time
 from colorama import Fore, Style
 import questionary
+from .i18n import _
 
 def ensure_ollama_and_model(model_name: str, ollama_url: str) -> bool:
-    """Ensure the Ollama model is available in a Docker environment."""
-    print(f"{Fore.CYAN}Docker environment detected.{Style.RESET_ALL}")
-    
-    # Step 1: Check if Ollama service is available
+    """确保Ollama模型在Docker环境中可用。"""
+    print(f"{Fore.CYAN}检测到Docker环境。{Style.RESET_ALL}")
+
+    # 步骤1：检查Ollama服务是否可用
     if not is_ollama_available(ollama_url):
         return False
-        
-    # Step 2: Check if model is already available
+
+    # 步骤2：检查模型是否已经可用
     available_models = get_available_models(ollama_url)
     if model_name in available_models:
-        print(f"{Fore.GREEN}Model {model_name} is available in the Docker Ollama container.{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}模型 {model_name} 在Docker Ollama容器中可用。{Style.RESET_ALL}")
         return True
-        
-    # Step 3: Model not available - ask if user wants to download
-    print(f"{Fore.YELLOW}Model {model_name} is not available in the Docker Ollama container.{Style.RESET_ALL}")
-    
-    if not questionary.confirm(f"Do you want to download {model_name}?").ask():
-        print(f"{Fore.RED}Cannot proceed without the model.{Style.RESET_ALL}")
+
+    # 步骤3：模型不可用 - 询问用户是否要下载
+    print(f"{Fore.YELLOW}模型 {model_name} 在Docker Ollama容器中不可用。{Style.RESET_ALL}")
+
+    if not questionary.confirm(f"您想要下载 {model_name} 吗？").ask():
+        print(f"{Fore.RED}没有模型无法继续。{Style.RESET_ALL}")
         return False
-        
-    # Step 4: Download the model
+
+    # 步骤4：下载模型
     return download_model(model_name, ollama_url)
 
 
 def is_ollama_available(ollama_url: str) -> bool:
-    """Check if Ollama service is available in Docker environment."""
+    """检查Ollama服务在Docker环境中是否可用。"""
     try:
         response = requests.get(f"{ollama_url}/api/version", timeout=5)
         if response.status_code == 200:
             return True
             
-        print(f"{Fore.RED}Cannot connect to Ollama service at {ollama_url}.{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Make sure the Ollama service is running in your Docker environment.{Style.RESET_ALL}")
+        print(f"{Fore.RED}无法连接到 {ollama_url} 的Ollama服务。{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}确保Ollama服务在您的Docker环境中运行。{Style.RESET_ALL}")
         return False
     except requests.RequestException as e:
-        print(f"{Fore.RED}Error connecting to Ollama service: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}连接Ollama服务时出错：{e}{Style.RESET_ALL}")
         return False
 
 
 def get_available_models(ollama_url: str) -> list:
-    """Get list of available models in Docker environment."""
+    """获取Docker环境中可用模型的列表。"""
     try:
         response = requests.get(f"{ollama_url}/api/tags", timeout=5)
         if response.status_code == 200:
             models = response.json().get("models", [])
             return [m["name"] for m in models]
             
-        print(f"{Fore.RED}Failed to get available models from Ollama service. Status code: {response.status_code}{Style.RESET_ALL}")
+        print(f"{Fore.RED}从Ollama服务获取可用模型失败。状态码：{response.status_code}{Style.RESET_ALL}")
         return []
     except requests.RequestException as e:
-        print(f"{Fore.RED}Error getting available models: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}获取可用模型时出错：{e}{Style.RESET_ALL}")
         return []
 
 
 def download_model(model_name: str, ollama_url: str) -> bool:
-    """Download a model in Docker environment."""
-    print(f"{Fore.YELLOW}Downloading model {model_name} to the Docker Ollama container...{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}This may take some time. Please be patient.{Style.RESET_ALL}")
+    """在Docker环境中下载模型。"""
+    print(f"{Fore.YELLOW}正在将模型 {model_name} 下载到Docker Ollama容器...{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}这可能需要一些时间。请耐心等待。{Style.RESET_ALL}")
     
-    # Step 1: Initiate the download
+    # 步骤1：启动下载
     try:
         response = requests.post(f"{ollama_url}/api/pull", json={"name": model_name}, timeout=10)
         if response.status_code != 200:
-            print(f"{Fore.RED}Failed to initiate model download. Status code: {response.status_code}{Style.RESET_ALL}")
+            print(f"{Fore.RED}启动模型下载失败。状态码：{response.status_code}{Style.RESET_ALL}")
             if response.text:
-                print(f"{Fore.RED}Error: {response.text}{Style.RESET_ALL}")
+                print(f"{Fore.RED}错误：{response.text}{Style.RESET_ALL}")
             return False
     except requests.RequestException as e:
-        print(f"{Fore.RED}Error initiating download request: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}启动下载请求时出错：{e}{Style.RESET_ALL}")
         return False
     
-    # Step 2: Monitor the download progress
-    print(f"{Fore.CYAN}Download initiated. Checking periodically for completion...{Style.RESET_ALL}")
-    
+    # 步骤2：监控下载进度
+    print(f"{Fore.CYAN}下载已启动。定期检查完成情况...{Style.RESET_ALL}")
+
     total_wait_time = 0
-    max_wait_time = 1800  # 30 minutes max wait
-    check_interval = 10  # Check every 10 seconds
+    max_wait_time = 1800  # 最多等待30分钟
+    check_interval = 10  # 每10秒检查一次
     
     while total_wait_time < max_wait_time:
-        # Check if the model has been downloaded
+        # 检查模型是否已下载
         available_models = get_available_models(ollama_url)
         if model_name in available_models:
-            print(f"{Fore.GREEN}Model {model_name} downloaded successfully.{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}模型 {model_name} 下载成功。{Style.RESET_ALL}")
             return True
             
-        # Wait before checking again
+        # 再次检查前等待
         time.sleep(check_interval)
         total_wait_time += check_interval
         
-        # Print a status message every minute
+        # 每分钟打印一次状态消息
         if total_wait_time % 60 == 0:
             minutes = total_wait_time // 60
-            print(f"{Fore.CYAN}Download in progress... ({minutes} minute{'s' if minutes != 1 else ''} elapsed){Style.RESET_ALL}")
+            print(f"{Fore.CYAN}下载进行中... (已过去 {minutes} 分钟){Style.RESET_ALL}")
     
-    # If we get here, we've timed out
-    print(f"{Fore.RED}Timed out waiting for model download to complete after {max_wait_time // 60} minutes.{Style.RESET_ALL}")
+    # 如果到达这里，说明超时了
+    print(f"{Fore.RED}等待模型下载完成超时，已等待 {max_wait_time // 60} 分钟。{Style.RESET_ALL}")
     return False
 
 
 def delete_model(model_name: str, ollama_url: str) -> bool:
-    """Delete a model in Docker environment."""
-    print(f"{Fore.YELLOW}Deleting model {model_name} from Docker container...{Style.RESET_ALL}")
+    """在Docker环境中删除模型。"""
+    print(f"{Fore.YELLOW}正在从Docker容器中删除模型 {model_name}...{Style.RESET_ALL}")
     
     try:
         response = requests.delete(f"{ollama_url}/api/delete", json={"name": model_name}, timeout=10)
         if response.status_code == 200:
-            print(f"{Fore.GREEN}Model {model_name} deleted successfully.{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}模型 {model_name} 删除成功。{Style.RESET_ALL}")
             return True
         else:
-            print(f"{Fore.RED}Failed to delete model. Status code: {response.status_code}{Style.RESET_ALL}")
+            print(f"{Fore.RED}删除模型失败。状态码：{response.status_code}{Style.RESET_ALL}")
             if response.text:
-                print(f"{Fore.RED}Error: {response.text}{Style.RESET_ALL}")
+                print(f"{Fore.RED}错误：{response.text}{Style.RESET_ALL}")
             return False
     except requests.RequestException as e:
-        print(f"{Fore.RED}Error deleting model: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}删除模型时出错：{e}{Style.RESET_ALL}")
         return False 

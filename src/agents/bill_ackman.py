@@ -8,6 +8,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 
 class BillAckmanSignal(BaseModel):
@@ -30,10 +31,10 @@ def bill_ackman_agent(state: AgentState, agent_id: str = "bill_ackman_agent"):
     ackman_analysis = {}
     
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5)
         
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         # Request multiple periods of data (annual or TTM) for a more robust long-term view.
         financial_line_items = search_line_items(
             ticker,
@@ -54,7 +55,7 @@ def bill_ackman_agent(state: AgentState, agent_id: str = "bill_ackman_agent"):
             limit=5
         )
         
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
         
         progress.update_status(agent_id, ticker, "Analyzing business quality")
@@ -96,7 +97,7 @@ def bill_ackman_agent(state: AgentState, agent_id: str = "bill_ackman_agent"):
             "valuation_analysis": valuation_analysis
         }
         
-        progress.update_status(agent_id, ticker, "Generating Bill Ackman analysis")
+        progress.update_status(agent_id, ticker, "生成比尔·阿克曼分析")
         ackman_output = generate_ackman_output(
             ticker=ticker, 
             analysis_data=analysis_data,
@@ -110,7 +111,7 @@ def bill_ackman_agent(state: AgentState, agent_id: str = "bill_ackman_agent"):
             "reasoning": ackman_output.reasoning
         }
         
-        progress.update_status(agent_id, ticker, "Done", analysis=ackman_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=ackman_output.reasoning)
     
     # Wrap results in a single message for the chain
     message = HumanMessage(
@@ -125,7 +126,7 @@ def bill_ackman_agent(state: AgentState, agent_id: str = "bill_ackman_agent"):
     # Add signals to the overall state
     state["data"]["analyst_signals"][agent_id] = ackman_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {
         "messages": [message],
@@ -406,10 +407,11 @@ def generate_ackman_output(
     Includes more explicit references to brand strength, activism potential, 
     catalysts, and management changes in the system prompt.
     """
-    template = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a Bill Ackman AI agent, making investment decisions using his principles:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Bill Ackman AI agent, making investment decisions using his principles:
 
             1. Seek high-quality businesses with durable competitive advantages (moats), often in well-known consumer or service brands.
             2. Prioritize consistent free cash flow and growth potential over the long term.
@@ -428,19 +430,24 @@ def generate_ackman_output(
 
             Return your final recommendation (signal: bullish, neutral, or bearish) with a 0-100 confidence and a thorough reasoning section.
             """
+
+    template = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            system_prompt,
         ),
         (
             "human",
-            """Based on the following analysis, create an Ackman-style investment signal.
+            """基于以下分析，创建阿克曼风格的投资信号。
 
-            Analysis Data for {ticker}:
+            股票代码 {ticker} 的分析数据：
             {analysis_data}
 
-            Return your output in strictly valid JSON:
+            请以严格有效的JSON格式返回您的输出：
             {{
               "signal": "bullish" | "bearish" | "neutral",
-              "confidence": float (0-100),
-              "reasoning": "string"
+              "confidence": 浮点数 (0-100),
+              "reasoning": "字符串"
             }}
             """
         )

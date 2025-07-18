@@ -7,6 +7,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 class CharlieMungerSignal(BaseModel):
     signal: Literal["bullish", "bearish", "neutral"]
@@ -27,10 +28,10 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
     munger_analysis = {}
     
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10)  # Munger looks at longer periods
         
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         financial_line_items = search_line_items(
             ticker,
             [
@@ -54,10 +55,10 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
             limit=10  # Munger examines long-term trends
         )
         
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
         
-        progress.update_status(agent_id, ticker, "Fetching insider trades")
+        progress.update_status(agent_id, ticker, "获取内幕交易数据")
         # Munger values management with skin in the game
         insider_trades = get_insider_trades(
             ticker,
@@ -67,7 +68,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
             limit=100
         )
         
-        progress.update_status(agent_id, ticker, "Fetching company news")
+        progress.update_status(agent_id, ticker, "获取公司新闻")
         # Munger avoids businesses with frequent negative press
         company_news = get_company_news(
             ticker,
@@ -120,7 +121,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
             "news_sentiment": analyze_news_sentiment(company_news) if company_news else "No news data available"
         }
         
-        progress.update_status(agent_id, ticker, "Generating Charlie Munger analysis")
+        progress.update_status(agent_id, ticker, "生成查理·芒格分析")
         munger_output = generate_munger_output(
             ticker=ticker, 
             analysis_data=analysis_data,
@@ -134,7 +135,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
             "reasoning": munger_output.reasoning
         }
         
-        progress.update_status(agent_id, ticker, "Done", analysis=munger_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=munger_output.reasoning)
     
     # Wrap results in a single message for the chain
     message = HumanMessage(
@@ -146,7 +147,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
     if state["metadata"]["show_reasoning"]:
         show_agent_reasoning(munger_analysis, "Charlie Munger Agent")
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
     
     # Add signals to the overall state
     state["data"]["analyst_signals"][agent_id] = munger_analysis
@@ -443,10 +444,14 @@ def analyze_predictability(financial_line_items: list) -> dict:
     
     if revenues and len(revenues) >= 5:
         # Calculate year-over-year growth rates, handling zero division
+        # Note: revenues are typically ordered from most recent to oldest
         growth_rates = []
         for i in range(len(revenues)-1):
-            if revenues[i+1] != 0:  # Avoid division by zero
-                growth_rate = (revenues[i] / revenues[i+1] - 1)
+            current_revenue = revenues[i]  # More recent
+            previous_revenue = revenues[i+1]  # Older
+            if abs(previous_revenue) > 1e-9:  # Avoid division by zero/very small numbers
+                # Correct growth rate calculation: (current - previous) / previous
+                growth_rate = (current_revenue - previous_revenue) / abs(previous_revenue)
                 growth_rates.append(growth_rate)
         
         if not growth_rates:
@@ -683,10 +688,11 @@ def generate_munger_output(
     """
     Generates investment decisions in the style of Charlie Munger.
     """
-    template = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            """You are a Charlie Munger AI agent, making investment decisions using his principles:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Charlie Munger AI agent, making investment decisions using his principles:
 
             1. Focus on the quality and predictability of the business.
             2. Rely on mental models from multiple disciplines to analyze investments.
@@ -719,19 +725,24 @@ def generate_munger_output(
             For example, if bullish: "The high ROIC of 22% demonstrates the company's moat. When applying basic microeconomics, we can see that competitors would struggle to..."
             For example, if bearish: "I see this business making a classic mistake in capital allocation. As I've often said about [relevant Mungerism], this company appears to be..."
             """
+
+    template = ChatPromptTemplate.from_messages([
+        (
+            "system",
+            system_prompt
         ),
         (
             "human",
-            """Based on the following analysis, create a Munger-style investment signal.
+            """基于以下分析，创建芒格风格的投资信号。
 
-            Analysis Data for {ticker}:
+            股票代码 {ticker} 的分析数据：
             {analysis_data}
 
-            Return the trading signal in this JSON format:
+            请按照以下JSON格式返回交易信号：
             {{
               "signal": "bullish/bearish/neutral",
-              "confidence": float (0-100),
-              "reasoning": "string"
+              "confidence": 浮点数 (0-100),
+              "reasoning": "字符串"
             }}
             """
         )

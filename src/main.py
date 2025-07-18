@@ -13,6 +13,7 @@ from src.utils.analysts import ANALYST_ORDER, get_analyst_nodes
 from src.utils.progress import progress
 from src.llm.models import LLM_ORDER, OLLAMA_LLM_ORDER, get_model_info, ModelProvider
 from src.utils.ollama import ensure_ollama_and_model
+from src.utils.i18n import _
 
 import argparse
 from datetime import datetime
@@ -20,28 +21,28 @@ from dateutil.relativedelta import relativedelta
 from src.utils.visualize import save_graph_as_png
 import json
 
-# Load environment variables from .env file
+# 从 .env 文件加载环境变量
 load_dotenv()
 
 init(autoreset=True)
 
 
 def parse_hedge_fund_response(response):
-    """Parses a JSON string and returns a dictionary."""
+    """解析JSON字符串并返回字典。"""
     try:
         return json.loads(response)
     except json.JSONDecodeError as e:
-        print(f"JSON decoding error: {e}\nResponse: {repr(response)}")
+        print(f"{_('JSON decoding error:')}: {e}\n{_('Response:')}: {repr(response)}")
         return None
     except TypeError as e:
-        print(f"Invalid response type (expected string, got {type(response).__name__}): {e}")
+        print(f"{_('Invalid response type (expected string, got')} {type(response).__name__}): {e}")
         return None
     except Exception as e:
-        print(f"Unexpected error while parsing response: {e}\nResponse: {repr(response)}")
+        print(f"{_('Unexpected error while parsing response:')}: {e}\n{_('Response:')}: {repr(response)}")
         return None
 
 
-##### Run the Hedge Fund #####
+##### 运行对冲基金 #####
 def run_hedge_fund(
     tickers: list[str],
     start_date: str,
@@ -52,11 +53,11 @@ def run_hedge_fund(
     model_name: str = "gpt-4.1",
     model_provider: str = "OpenAI",
 ):
-    # Start progress tracking
+    # 开始进度跟踪
     progress.start()
 
     try:
-        # Create a new workflow if analysts are customized
+        # 如果分析师被自定义，创建新的工作流
         if selected_analysts:
             workflow = create_workflow(selected_analysts)
             agent = workflow.compile()
@@ -67,7 +68,7 @@ def run_hedge_fund(
             {
                 "messages": [
                     HumanMessage(
-                        content="Make trading decisions based on the provided data.",
+                        content="根据提供的数据做出交易决策。",
                     )
                 ],
                 "data": {
@@ -75,6 +76,7 @@ def run_hedge_fund(
                     "portfolio": portfolio,
                     "start_date": start_date,
                     "end_date": end_date,
+                    "current_date": end_date,  # 添加当前日期用于持仓管理
                     "analyst_signals": {},
                 },
                 "metadata": {
@@ -90,37 +92,37 @@ def run_hedge_fund(
             "analyst_signals": final_state["data"]["analyst_signals"],
         }
     finally:
-        # Stop progress tracking
+        # 停止进度跟踪
         progress.stop()
 
 
 def start(state: AgentState):
-    """Initialize the workflow with the input message."""
+    """使用输入消息初始化工作流。"""
     return state
 
 
 def create_workflow(selected_analysts=None):
-    """Create the workflow with selected analysts."""
+    """使用选定的分析师创建工作流。"""
     workflow = StateGraph(AgentState)
     workflow.add_node("start_node", start)
 
-    # Get analyst nodes from the configuration
+    # 从配置中获取分析师节点
     analyst_nodes = get_analyst_nodes()
 
-    # Default to all analysts if none selected
+    # 如果没有选择分析师，默认使用所有分析师
     if selected_analysts is None:
         selected_analysts = list(analyst_nodes.keys())
-    # Add selected analyst nodes
+    # 添加选定的分析师节点
     for analyst_key in selected_analysts:
         node_name, node_func = analyst_nodes[analyst_key]
         workflow.add_node(node_name, node_func)
         workflow.add_edge("start_node", node_name)
 
-    # Always add risk and portfolio management
+    # 始终添加风险和投资组合管理
     workflow.add_node("risk_management_agent", risk_management_agent)
     workflow.add_node("portfolio_manager", portfolio_management_agent)
 
-    # Connect selected analysts to risk management
+    # 将选定的分析师连接到风险管理
     for analyst_key in selected_analysts:
         node_name = analyst_nodes[analyst_key][0]
         workflow.add_edge(node_name, "risk_management_agent")
@@ -133,123 +135,42 @@ def create_workflow(selected_analysts=None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the hedge fund trading system")
-    parser.add_argument("--initial-cash", type=float, default=100000.0, help="Initial cash position. Defaults to 100000.0)")
-    parser.add_argument("--margin-requirement", type=float, default=0.0, help="Initial margin requirement. Defaults to 0.0")
-    parser.add_argument("--tickers", type=str, required=True, help="Comma-separated list of stock ticker symbols")
+    parser = argparse.ArgumentParser(description=_("Run the hedge fund trading system"))
+    parser.add_argument("--initial-cash", type=float, default=100000.0, help=_("Initial cash position. Defaults to 100000.0)"))
+    parser.add_argument("--margin-requirement", type=float, default=0.0, help=_("Initial margin requirement. Defaults to 0.0"))
+    parser.add_argument("--tickers", type=str, required=True, help=_("Comma-separated list of stock ticker symbols"))
     parser.add_argument(
         "--start-date",
         type=str,
-        help="Start date (YYYY-MM-DD). Defaults to 3 months before end date",
+        help=_("Start date (YYYY-MM-DD). Defaults to 3 months before end date"),
     )
-    parser.add_argument("--end-date", type=str, help="End date (YYYY-MM-DD). Defaults to today")
-    parser.add_argument("--show-reasoning", action="store_true", help="Show reasoning from each agent")
-    parser.add_argument("--show-agent-graph", action="store_true", help="Show the agent graph")
-    parser.add_argument("--ollama", action="store_true", help="Use Ollama for local LLM inference")
+    parser.add_argument("--end-date", type=str, help=_("End date (YYYY-MM-DD). Defaults to today"))
+    parser.add_argument("--show-reasoning", action="store_true", help=_("Show reasoning from each agent"))
+    parser.add_argument("--show-agent-graph", action="store_true", help=_("Show the agent graph"))
+    parser.add_argument("--ollama", action="store_true", help=_("Use Ollama for local LLM inference"))
 
     args = parser.parse_args()
 
-    # Parse tickers from comma-separated string
+    # 从逗号分隔的字符串解析股票代码
     tickers = [ticker.strip() for ticker in args.tickers.split(",")]
 
-    # Select analysts
-    selected_analysts = None
-    choices = questionary.checkbox(
-        "Select your AI analysts.",
-        choices=[questionary.Choice(display, value=value) for display, value in ANALYST_ORDER],
-        instruction="\n\nInstructions: \n1. Press Space to select/unselect analysts.\n2. Press 'a' to select/unselect all.\n3. Press Enter when done to run the hedge fund.\n",
-        validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
-        style=questionary.Style(
-            [
-                ("checkbox-selected", "fg:green"),
-                ("selected", "fg:green noinherit"),
-                ("highlighted", "noinherit"),
-                ("pointer", "noinherit"),
-            ]
-        ),
-    ).ask()
+    # 使用新的选择流程管理器
+    from src.utils.selection_flow import SelectionFlowManager
 
-    if not choices:
-        print("\n\nInterrupt received. Exiting...")
+    flow_manager = SelectionFlowManager(
+        use_ollama=args.ollama,
+        title_prefix="AI对冲基金系统"
+    )
+
+    # 运行选择流程
+    selected_analysts, model_name, model_provider = flow_manager.run_flow()
+
+    # 检查用户是否取消了操作
+    if selected_analysts is None or model_name is None or model_provider is None:
+        print(f"\n\n{_('Operation cancelled. Exiting...')}")
         sys.exit(0)
-    else:
-        selected_analysts = choices
-        print(f"\nSelected analysts: {', '.join(Fore.GREEN + choice.title().replace('_', ' ') + Style.RESET_ALL for choice in choices)}\n")
 
-    # Select LLM model based on whether Ollama is being used
-    model_name = ""
-    model_provider = ""
-
-    if args.ollama:
-        print(f"{Fore.CYAN}Using Ollama for local LLM inference.{Style.RESET_ALL}")
-
-        # Select from Ollama-specific models
-        model_name: str = questionary.select(
-            "Select your Ollama model:",
-            choices=[questionary.Choice(display, value=value) for display, value, _ in OLLAMA_LLM_ORDER],
-            style=questionary.Style(
-                [
-                    ("selected", "fg:green bold"),
-                    ("pointer", "fg:green bold"),
-                    ("highlighted", "fg:green"),
-                    ("answer", "fg:green bold"),
-                ]
-            ),
-        ).ask()
-
-        if not model_name:
-            print("\n\nInterrupt received. Exiting...")
-            sys.exit(0)
-
-        if model_name == "-":
-            model_name = questionary.text("Enter the custom model name:").ask()
-            if not model_name:
-                print("\n\nInterrupt received. Exiting...")
-                sys.exit(0)
-
-        # Ensure Ollama is installed, running, and the model is available
-        if not ensure_ollama_and_model(model_name):
-            print(f"{Fore.RED}Cannot proceed without Ollama and the selected model.{Style.RESET_ALL}")
-            sys.exit(1)
-
-        model_provider = ModelProvider.OLLAMA.value
-        print(f"\nSelected {Fore.CYAN}Ollama{Style.RESET_ALL} model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
-    else:
-        # Use the standard cloud-based LLM selection
-        model_choice = questionary.select(
-            "Select your LLM model:",
-            choices=[questionary.Choice(display, value=(name, provider)) for display, name, provider in LLM_ORDER],
-            style=questionary.Style(
-                [
-                    ("selected", "fg:green bold"),
-                    ("pointer", "fg:green bold"),
-                    ("highlighted", "fg:green"),
-                    ("answer", "fg:green bold"),
-                ]
-            ),
-        ).ask()
-
-        if not model_choice:
-            print("\n\nInterrupt received. Exiting...")
-            sys.exit(0)
-
-        model_name, model_provider = model_choice
-
-        # Get model info using the helper function
-        model_info = get_model_info(model_name, model_provider)
-        if model_info:
-            if model_info.is_custom():
-                model_name = questionary.text("Enter the custom model name:").ask()
-                if not model_name:
-                    print("\n\nInterrupt received. Exiting...")
-                    sys.exit(0)
-
-            print(f"\nSelected {Fore.CYAN}{model_provider}{Style.RESET_ALL} model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
-        else:
-            model_provider = "Unknown"
-            print(f"\nSelected model: {Fore.GREEN + Style.BRIGHT}{model_name}{Style.RESET_ALL}\n")
-
-    # Create the workflow with selected analysts
+    # 使用选定的分析师创建工作流
     workflow = create_workflow(selected_analysts)
     app = workflow.compile()
 
@@ -261,53 +182,53 @@ if __name__ == "__main__":
             file_path += "graph.png"
         save_graph_as_png(app, file_path)
 
-    # Validate dates if provided
+    # 如果提供了日期，验证日期格式
     if args.start_date:
         try:
             datetime.strptime(args.start_date, "%Y-%m-%d")
         except ValueError:
-            raise ValueError("Start date must be in YYYY-MM-DD format")
+            raise ValueError(_("Start date must be in YYYY-MM-DD format"))
 
     if args.end_date:
         try:
             datetime.strptime(args.end_date, "%Y-%m-%d")
         except ValueError:
-            raise ValueError("End date must be in YYYY-MM-DD format")
+            raise ValueError(_("End date must be in YYYY-MM-DD format"))
 
-    # Set the start and end dates
+    # 设置开始和结束日期
     end_date = args.end_date or datetime.now().strftime("%Y-%m-%d")
     if not args.start_date:
-        # Calculate 3 months before end_date
+        # 计算结束日期前3个月
         end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
         start_date = (end_date_obj - relativedelta(months=3)).strftime("%Y-%m-%d")
     else:
         start_date = args.start_date
 
-    # Initialize portfolio with cash amount and stock positions
+    # 使用现金金额和股票仓位初始化投资组合
     portfolio = {
-        "cash": args.initial_cash,  # Initial cash amount
-        "margin_requirement": args.margin_requirement,  # Initial margin requirement
-        "margin_used": 0.0,  # total margin usage across all short positions
+        "cash": args.initial_cash,  # 初始现金金额
+        "margin_requirement": args.margin_requirement,  # 初始保证金要求
+        "margin_used": 0.0,  # 所有空头仓位的总保证金使用量
         "positions": {
             ticker: {
-                "long": 0,  # Number of shares held long
-                "short": 0,  # Number of shares held short
-                "long_cost_basis": 0.0,  # Average cost basis for long positions
-                "short_cost_basis": 0.0,  # Average price at which shares were sold short
-                "short_margin_used": 0.0,  # Dollars of margin used for this ticker's short
+                "long": 0,  # 持有的多头股份数量
+                "short": 0,  # 持有的空头股份数量
+                "long_cost_basis": 0.0,  # 多头仓位的平均成本基础
+                "short_cost_basis": 0.0,  # 卖空股票的平均价格
+                "short_margin_used": 0.0,  # 该股票空头使用的保证金金额
             }
             for ticker in tickers
         },
         "realized_gains": {
             ticker: {
-                "long": 0.0,  # Realized gains from long positions
-                "short": 0.0,  # Realized gains from short positions
+                "long": 0.0,  # 多头仓位的已实现收益
+                "short": 0.0,  # 空头仓位的已实现收益
             }
             for ticker in tickers
         },
     }
 
-    # Run the hedge fund
+    # 运行对冲基金
     result = run_hedge_fund(
         tickers=tickers,
         start_date=start_date,

@@ -7,6 +7,7 @@ from typing_extensions import Literal
 from src.tools.api import get_financial_metrics, get_market_cap, search_line_items
 from src.utils.llm import call_llm
 from src.utils.progress import progress
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 class RakeshJhunjhunwalaSignal(BaseModel):
     signal: Literal["bullish", "bearish", "neutral"]
@@ -26,10 +27,10 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
     for ticker in tickers:
 
         # Core Data
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5)
 
-        progress.update_status(agent_id, ticker, "Fetching financial line items")
+        progress.update_status(agent_id, ticker, "获取财务项目")
         financial_line_items = search_line_items(
             ticker,
             [
@@ -50,26 +51,26 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
             end_date,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
         # ─── Analyses ───────────────────────────────────────────────────────────
-        progress.update_status(agent_id, ticker, "Analyzing growth")
+        progress.update_status(agent_id, ticker, "分析成长性")
         growth_analysis = analyze_growth(financial_line_items)
 
-        progress.update_status(agent_id, ticker, "Analyzing profitability")
+        progress.update_status(agent_id, ticker, "分析盈利能力")
         profitability_analysis = analyze_profitability(financial_line_items)
         
-        progress.update_status(agent_id, ticker, "Analyzing balance sheet")
+        progress.update_status(agent_id, ticker, "分析资产负债表")
         balancesheet_analysis = analyze_balance_sheet(financial_line_items)
         
-        progress.update_status(agent_id, ticker, "Analyzing cash flow")
+        progress.update_status(agent_id, ticker, "分析现金流")
         cashflow_analysis = analyze_cash_flow(financial_line_items)
         
-        progress.update_status(agent_id, ticker, "Analyzing management actions")
+        progress.update_status(agent_id, ticker, "分析管理决策")
         management_analysis = analyze_management_actions(financial_line_items)
         
-        progress.update_status(agent_id, ticker, "Calculating intrinsic value")
+        progress.update_status(agent_id, ticker, "计算内在价值")
         # Calculate intrinsic value once
         intrinsic_value = calculate_intrinsic_value(financial_line_items, market_cap)
 
@@ -133,7 +134,7 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
         }
 
         # ─── LLM: craft Jhunjhunwala‑style narrative ──────────────────────────────
-        progress.update_status(agent_id, ticker, "Generating Jhunjhunwala analysis")
+        progress.update_status(agent_id, ticker, "生成朱恩朱恩瓦拉分析")
         jhunjhunwala_output = generate_jhunjhunwala_output(
             ticker=ticker,
             analysis_data=analysis_data[ticker],
@@ -143,7 +144,7 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
 
         jhunjhunwala_analysis[ticker] = jhunjhunwala_output.model_dump()
 
-        progress.update_status(agent_id, ticker, "Done", analysis=jhunjhunwala_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=jhunjhunwala_output.reasoning)
 
     # ─── Push message back to graph state ──────────────────────────────────────
     message = HumanMessage(content=json.dumps(jhunjhunwala_analysis), name=agent_id)
@@ -152,7 +153,7 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
         show_agent_reasoning(jhunjhunwala_analysis, "Rakesh Jhunjhunwala Agent")
 
     state["data"]["analyst_signals"][agent_id] = jhunjhunwala_analysis
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
@@ -646,11 +647,12 @@ def generate_jhunjhunwala_output(
     agent_id: str,
 ) -> RakeshJhunjhunwalaSignal:
     """Get investment decision from LLM with Jhunjhunwala's principles"""
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are a Rakesh Jhunjhunwala AI agent. Decide on investment signals based on Rakesh Jhunjhunwala's principles:
+
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Rakesh Jhunjhunwala AI agent. Decide on investment signals based on Rakesh Jhunjhunwala's principles:
                 - Circle of Competence: Only invest in businesses you understand
                 - Margin of Safety (> 30%): Buy at a significant discount to intrinsic value
                 - Economic Moat: Look for durable competitive advantages
@@ -670,8 +672,13 @@ def generate_jhunjhunwala_output(
                 For example, if bullish: "I'm particularly impressed with the consistent growth and strong balance sheet, reminiscent of quality companies that create long-term wealth..."
                 For example, if bearish: "The deteriorating margins and high debt levels concern me - this doesn't fit the profile of companies that build lasting value..."
 
-                Follow these guidelines strictly.
-                """,
+                Follow these guidelines strictly."""
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",

@@ -14,6 +14,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 
 class PeterLynchSignal(BaseModel):
@@ -49,10 +50,10 @@ def peter_lynch_agent(state: AgentState, agent_id: str = "peter_lynch_agent"):
     lynch_analysis = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5)
 
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         # Relevant line items for Peter Lynch's approach
         financial_line_items = search_line_items(
             ticker,
@@ -75,29 +76,29 @@ def peter_lynch_agent(state: AgentState, agent_id: str = "peter_lynch_agent"):
             limit=5,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
-        progress.update_status(agent_id, ticker, "Fetching insider trades")
+        progress.update_status(agent_id, ticker, "获取内幕交易数据")
         insider_trades = get_insider_trades(ticker, end_date, start_date=None, limit=50)
 
-        progress.update_status(agent_id, ticker, "Fetching company news")
+        progress.update_status(agent_id, ticker, "获取公司新闻")
         company_news = get_company_news(ticker, end_date, start_date=None, limit=50)
 
-        progress.update_status(agent_id, ticker, "Fetching recent price data for reference")
+        progress.update_status(agent_id, ticker, "获取参考价格数据")
         prices = get_prices(ticker, start_date=start_date, end_date=end_date)
 
         # Perform sub-analyses:
-        progress.update_status(agent_id, ticker, "Analyzing growth")
+        progress.update_status(agent_id, ticker, "分析成长性")
         growth_analysis = analyze_lynch_growth(financial_line_items)
 
-        progress.update_status(agent_id, ticker, "Analyzing fundamentals")
+        progress.update_status(agent_id, ticker, "分析基本面")
         fundamentals_analysis = analyze_lynch_fundamentals(financial_line_items)
 
         progress.update_status(agent_id, ticker, "Analyzing valuation (focus on PEG)")
         valuation_analysis = analyze_lynch_valuation(financial_line_items, market_cap)
 
-        progress.update_status(agent_id, ticker, "Analyzing sentiment")
+        progress.update_status(agent_id, ticker, "分析市场情绪")
         sentiment_analysis = analyze_sentiment(company_news)
 
         progress.update_status(agent_id, ticker, "Analyzing insider activity")
@@ -135,7 +136,7 @@ def peter_lynch_agent(state: AgentState, agent_id: str = "peter_lynch_agent"):
             "insider_activity": insider_activity,
         }
 
-        progress.update_status(agent_id, ticker, "Generating Peter Lynch analysis")
+        progress.update_status(agent_id, ticker, "生成彼得·林奇分析")
         lynch_output = generate_lynch_output(
             ticker=ticker,
             analysis_data=analysis_data[ticker],
@@ -149,7 +150,7 @@ def peter_lynch_agent(state: AgentState, agent_id: str = "peter_lynch_agent"):
             "reasoning": lynch_output.reasoning,
         }
 
-        progress.update_status(agent_id, ticker, "Done", analysis=lynch_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=lynch_output.reasoning)
 
     # Wrap up results
     message = HumanMessage(content=json.dumps(lynch_analysis), name=agent_id)
@@ -160,7 +161,7 @@ def peter_lynch_agent(state: AgentState, agent_id: str = "peter_lynch_agent"):
     # Save signals to state
     state["data"]["analyst_signals"][agent_id] = lynch_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
@@ -323,23 +324,34 @@ def analyze_lynch_valuation(financial_line_items: list, market_cap: float | None
     if len(eps_values) >= 2:
         latest_eps = eps_values[0]
         older_eps = eps_values[-1]
-        if older_eps > 0:
-            eps_growth_rate = (latest_eps - older_eps) / older_eps
-            details.append(f"Approx EPS growth rate: {eps_growth_rate:.1%}")
+        if abs(older_eps) > 1e-9:  # Avoid division by very small numbers
+            # Calculate annualized growth rate if we have multiple periods
+            periods = len(eps_values) - 1
+            if periods > 0:
+                # Annualized growth rate: (final/initial)^(1/periods) - 1
+                eps_growth_rate = (latest_eps / older_eps) ** (1/periods) - 1
+                details.append(f"Annualized EPS growth rate: {eps_growth_rate:.1%}")
+            else:
+                eps_growth_rate = (latest_eps - older_eps) / abs(older_eps)
+                details.append(f"EPS growth rate: {eps_growth_rate:.1%}")
         else:
-            details.append("Cannot compute EPS growth rate (older EPS <= 0)")
+            details.append("Cannot compute EPS growth rate (older EPS near zero)")
     else:
         details.append("Not enough EPS data to compute growth rate")
 
     # Compute PEG if possible
     peg_ratio = None
     if pe_ratio and eps_growth_rate and eps_growth_rate > 0:
-        # Peg ratio typically uses a percentage growth rate
-        # So if growth rate is 0.25, we treat it as 25 for the formula => PE / 25
-        # Alternatively, some treat it as 0.25 => we do (PE / (0.25 * 100)).
-        # Implementation can vary, but let's do a standard approach: PEG = PE / (Growth * 100).
-        peg_ratio = pe_ratio / (eps_growth_rate * 100)
-        details.append(f"PEG ratio: {peg_ratio:.2f}")
+        # Standard PEG calculation: P/E divided by growth rate as percentage
+        # If growth rate is 0.25 (25%), PEG = PE / 25
+        growth_percentage = eps_growth_rate * 100
+        if growth_percentage > 0.1:  # Avoid division by very small growth rates
+            peg_ratio = pe_ratio / growth_percentage
+            details.append(f"PEG ratio: {peg_ratio:.2f} (PE: {pe_ratio:.1f}, Growth: {growth_percentage:.1f}%)")
+        else:
+            details.append(f"Growth rate too low for meaningful PEG calculation: {growth_percentage:.2f}%")
+    elif pe_ratio and eps_growth_rate is not None and eps_growth_rate <= 0:
+        details.append(f"Cannot calculate PEG with negative/zero growth rate: {eps_growth_rate:.1%}")
 
     # Scoring logic:
     #   - P/E < 15 => +2, < 25 => +1
@@ -447,11 +459,11 @@ def generate_lynch_output(
     """
     Generates a final JSON signal in Peter Lynch's voice & style.
     """
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are a Peter Lynch AI agent. You make investment decisions based on Peter Lynch's well-known principles:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Peter Lynch AI agent. You make investment decisions based on Peter Lynch's well-known principles:
                 
                 1. Invest in What You Know: Emphasize understandable businesses, possibly discovered in everyday life.
                 2. Growth at a Reasonable Price (GARP): Rely on the PEG ratio as a prime metric.
@@ -474,16 +486,22 @@ def generate_lynch_output(
                   "confidence": 0 to 100,
                   "reasoning": "string"
                 }}
-                """,
+                """
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",
-                """Based on the following analysis data for {ticker}, produce your Peter Lynch–style investment signal.
+                """基于以下股票代码 {ticker} 的分析数据，生成您的彼得·林奇风格投资信号。
 
-                Analysis Data:
+                分析数据：
                 {analysis_data}
 
-                Return only valid JSON with "signal", "confidence", and "reasoning".
+                请仅返回包含"signal"、"confidence"和"reasoning"的有效JSON。
                 """,
             ),
         ]

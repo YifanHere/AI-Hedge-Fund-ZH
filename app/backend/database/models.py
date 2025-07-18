@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, JSON, ForeignKey, Float, Date, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from .connection import Base
 
@@ -94,4 +94,90 @@ class HedgeFundFlowRunCycle(Base):
     market_conditions = Column(JSON, nullable=True)  # Market data snapshot at cycle start
 
 
- 
+class AnalystReasoning(Base):
+    """AI分析师思考过程详细记录表"""
+    __tablename__ = "analyst_reasoning"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 关联到决策周期
+    flow_run_cycle_id = Column(Integer, ForeignKey("hedge_fund_flow_run_cycles.id"), nullable=False, index=True)
+
+    # 时间信息
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    decision_date = Column(Date, nullable=False, index=True)  # 决策日期
+
+    # 分析师信息
+    agent_id = Column(String(100), nullable=False, index=True)  # 分析师ID (如 "aswath_damodaran_agent")
+    agent_name = Column(String(200), nullable=False)  # 分析师中文名称
+
+    # 股票信息
+    ticker = Column(String(20), nullable=False, index=True)  # 股票代码
+
+    # 分析结果
+    signal = Column(String(20), nullable=False)  # bullish, bearish, neutral
+    confidence = Column(Float, nullable=False)  # 信心度 0-100
+    reasoning = Column(Text, nullable=False)  # 详细思考过程
+
+    # 市场数据快照
+    stock_price = Column(Float, nullable=True)  # 当时的股票价格
+    market_data = Column(JSON, nullable=True)  # 其他市场数据
+
+    # 额外分析数据
+    additional_data = Column(JSON, nullable=True)  # 分析师特定的额外数据
+
+    # 投资组合状态快照
+    portfolio_cash = Column(Float, nullable=True)  # 当时的现金余额
+    portfolio_positions = Column(JSON, nullable=True)  # 当时的持仓情况
+
+    # 索引
+    __table_args__ = (
+        Index('idx_analyst_reasoning_date_agent', 'decision_date', 'agent_id'),
+        Index('idx_analyst_reasoning_ticker_date', 'ticker', 'decision_date'),
+        Index('idx_analyst_reasoning_signal', 'signal'),
+    )
+
+
+class AnalystPerformanceMetrics(Base):
+    """分析师表现指标表"""
+    __tablename__ = "analyst_performance_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # 分析师信息
+    agent_id = Column(String(100), nullable=False, index=True)
+    agent_name = Column(String(200), nullable=False)
+
+    # 时间范围
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 基础统计
+    total_predictions = Column(Integer, nullable=False, default=0)
+    bullish_predictions = Column(Integer, nullable=False, default=0)
+    bearish_predictions = Column(Integer, nullable=False, default=0)
+    neutral_predictions = Column(Integer, nullable=False, default=0)
+
+    # 准确性指标
+    correct_predictions = Column(Integer, nullable=False, default=0)
+    accuracy_rate = Column(Float, nullable=True)  # 准确率
+
+    # 信心度统计
+    avg_confidence = Column(Float, nullable=True)
+    confidence_accuracy_correlation = Column(Float, nullable=True)  # 信心度与准确性的相关性
+
+    # 收益指标
+    total_return = Column(Float, nullable=True)  # 如果按照该分析师建议的总收益
+    sharpe_ratio = Column(Float, nullable=True)  # 夏普比率
+
+    # 详细统计数据
+    detailed_stats = Column(JSON, nullable=True)  # 更详细的统计信息
+
+    # 索引
+    __table_args__ = (
+        Index('idx_analyst_performance_agent_date', 'agent_id', 'start_date', 'end_date'),
+        UniqueConstraint('agent_id', 'start_date', 'end_date', name='uq_analyst_performance_period'),
+    )
+
+

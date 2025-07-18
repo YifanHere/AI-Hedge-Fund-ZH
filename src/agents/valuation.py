@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-"""Valuation Agent
+"""优化的估值分析师
 
-Implements four complementary valuation methodologies and aggregates them with
-configurable weights. 
+实现多元化估值方法，更适合短中期交易，减少极端估值偏见
 """
 
 from statistics import median
 import json
+import math
 from langchain_core.messages import HumanMessage
 from src.graph.state import AgentState, show_agent_reasoning
 from src.utils.progress import progress
@@ -28,7 +28,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
     valuation_analysis: dict[str, dict] = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial data")
+        progress.update_status(agent_id, ticker, "获取财务数据")
 
         # --- Historical financial metrics (pull 8 latest TTM snapshots for medians) ---
         financial_metrics = get_financial_metrics(
@@ -43,7 +43,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
         most_recent_metrics = financial_metrics[0]
 
         # --- Fine‑grained line‑items (need two periods to calc WC change) ---
-        progress.update_status(agent_id, ticker, "Gathering line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         line_items = search_line_items(
             ticker=ticker,
             line_items=[
@@ -67,21 +67,29 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
         # ------------------------------------------------------------------
         wc_change = li_curr.working_capital - li_prev.working_capital
 
-        # Owner Earnings
+        # 优化的所有者收益模型
+        earnings_growth = most_recent_metrics.earnings_growth or 0.05
+        adjusted_growth_rate = min(max(earnings_growth, 0.03), 0.15)  # 与DCF保持一致
+
         owner_val = calculate_owner_earnings_value(
             net_income=li_curr.net_income,
             depreciation=li_curr.depreciation_and_amortization,
             capex=li_curr.capital_expenditure,
             working_capital_change=wc_change,
-            growth_rate=most_recent_metrics.earnings_growth or 0.05,
+            growth_rate=adjusted_growth_rate,
         )
 
         # Discounted Cash Flow
+        # 优化的DCF估值 - 更适合成长股
+        earnings_growth = most_recent_metrics.earnings_growth or 0.05
+        # 对于高增长股，使用更合理的增长率
+        adjusted_growth_rate = min(max(earnings_growth, 0.03), 0.15)  # 3%-15%之间
+
         dcf_val = calculate_intrinsic_value(
             free_cash_flow=li_curr.free_cash_flow,
-            growth_rate=most_recent_metrics.earnings_growth or 0.05,
-            discount_rate=0.10,
-            terminal_growth_rate=0.03,
+            growth_rate=adjusted_growth_rate,
+            discount_rate=0.09,  # 从10%降到9%，更符合当前利率环境
+            terminal_growth_rate=0.025,  # 从3%降到2.5%
             num_years=5,
         )
 
@@ -97,47 +105,92 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
         )
 
         # ------------------------------------------------------------------
-        # Aggregate & signal
+        # 优化的估值聚合与信号生成 - 适合短中期交易
         # ------------------------------------------------------------------
         market_cap = get_market_cap(ticker, end_date)
         if not market_cap:
             progress.update_status(agent_id, ticker, "Failed: Market cap unavailable")
             continue
 
+        # 重新设计权重分配 - 降低DCF权重，增加相对估值权重
         method_values = {
-            "dcf": {"value": dcf_val, "weight": 0.35},
-            "owner_earnings": {"value": owner_val, "weight": 0.35},
-            "ev_ebitda": {"value": ev_ebitda_val, "weight": 0.20},
-            "residual_income": {"value": rim_val, "weight": 0.10},
+            "ev_ebitda": {"value": ev_ebitda_val, "weight": 0.40},      # 提高相对估值权重
+            "dcf": {"value": dcf_val, "weight": 0.25},                 # 降低DCF权重
+            "owner_earnings": {"value": owner_val, "weight": 0.25},    # 降低所有者收益权重
+            "residual_income": {"value": rim_val, "weight": 0.10},     # 保持剩余收益权重
         }
 
-        total_weight = sum(v["weight"] for v in method_values.values() if v["value"] > 0)
+        # 计算有效估值方法
+        valid_methods = {k: v for k, v in method_values.items() if v["value"] > 0}
+        total_weight = sum(v["weight"] for v in valid_methods.values())
+
         if total_weight == 0:
             progress.update_status(agent_id, ticker, "Failed: All valuation methods zero")
             continue
 
+        # 计算估值差距
         for v in method_values.values():
             v["gap"] = (v["value"] - market_cap) / market_cap if v["value"] > 0 else None
 
+        # 计算加权平均差距
         weighted_gap = sum(
-            v["weight"] * v["gap"] for v in method_values.values() if v["gap"] is not None
+            v["weight"] * v["gap"] for v in valid_methods.values() if v["gap"] is not None
         ) / total_weight
 
-        signal = "bullish" if weighted_gap > 0.15 else "bearish" if weighted_gap < -0.15 else "neutral"
-        confidence = round(min(abs(weighted_gap) / 0.30 * 100, 100))
+        # 优化的信号生成逻辑 - 更宽松的阈值
+        # 考虑到成长股的特点，适当放宽估值容忍度
+        if weighted_gap > 0.25:  # 明显低估 >25%
+            signal = "bullish"
+            confidence_base = 70
+        elif weighted_gap > 0.10:  # 轻微低估 >10%
+            signal = "bullish"
+            confidence_base = 50
+        elif weighted_gap > -0.20:  # 合理估值 -20%~10%
+            signal = "neutral"
+            confidence_base = 40
+        elif weighted_gap > -0.40:  # 轻微高估 -40%~-20%
+            signal = "bearish"
+            confidence_base = 50
+        else:  # 明显高估 <-40%
+            signal = "bearish"
+            confidence_base = 70
 
-        reasoning = {
-            f"{m}_analysis": {
-                "signal": (
-                    "bullish" if vals["gap"] and vals["gap"] > 0.15 else
-                    "bearish" if vals["gap"] and vals["gap"] < -0.15 else "neutral"
-                ),
-                "details": (
-                    f"Value: ${vals['value']:,.2f}, Market Cap: ${market_cap:,.2f}, "
-                    f"Gap: {vals['gap']:.1%}, Weight: {vals['weight']*100:.0f}%"
-                ),
-            }
-            for m, vals in method_values.items() if vals["value"] > 0
+        # 信心度计算 - 基于估值差距的绝对值
+        if math.isnan(weighted_gap):
+            confidence = 40  # 默认中等信心度
+        else:
+            gap_magnitude = abs(weighted_gap)
+            # 差距越大，信心度越高，但设置上限
+            confidence_adjustment = min(gap_magnitude * 100, 30)
+            confidence = min(confidence_base + confidence_adjustment, 85)
+            confidence = round(confidence)
+
+        # 优化的reasoning - 提供更详细的分析
+        reasoning = {}
+        for m, vals in method_values.items():
+            if vals["value"] > 0:
+                # 使用新的阈值标准
+                if vals["gap"] and vals["gap"] > 0.25:
+                    method_signal = "bullish"
+                elif vals["gap"] and vals["gap"] < -0.40:
+                    method_signal = "bearish"
+                else:
+                    method_signal = "neutral"
+
+                reasoning[f"{m}_analysis"] = {
+                    "signal": method_signal,
+                    "details": (
+                        f"Value: ${vals['value']:,.2f}, Market Cap: ${market_cap:,.2f}, "
+                        f"Gap: {vals['gap']:.1%}, Weight: {vals['weight']*100:.0f}%"
+                    ),
+                }
+
+        # 添加综合分析
+        reasoning["overall_analysis"] = {
+            "weighted_gap": f"{weighted_gap:.1%}",
+            "signal_logic": f"加权估值差距{weighted_gap:.1%}，阈值：看涨>25%，看跌<-40%",
+            "method_weights": {k: f"{v['weight']*100:.0f}%" for k, v in method_values.items()},
+            "confidence_explanation": f"基于{len(valid_methods)}个有效估值方法，差距绝对值{abs(weighted_gap):.1%}"
         }
 
         valuation_analysis[ticker] = {
@@ -145,7 +198,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
             "confidence": confidence,
             "reasoning": reasoning,
         }
-        progress.update_status(agent_id, ticker, "Done", analysis=json.dumps(reasoning, indent=4))
+        progress.update_status(agent_id, ticker, "完成", analysis=json.dumps(reasoning, indent=4))
 
     # ---- Emit message (for LLM tool chain) ----
     msg = HumanMessage(content=json.dumps(valuation_analysis), name=agent_id)
@@ -155,7 +208,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
     # Add the signal to the analyst_signals list
     state["data"]["analyst_signals"][agent_id] = valuation_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
     
     return {"messages": [msg], "data": data}
 
@@ -169,8 +222,8 @@ def calculate_owner_earnings_value(
     capex: float | None,
     working_capital_change: float | None,
     growth_rate: float = 0.05,
-    required_return: float = 0.15,
-    margin_of_safety: float = 0.25,
+    required_return: float = 0.12,  # 从15%降到12%
+    margin_of_safety: float = 0.15,  # 从25%降到15%
     num_years: int = 5,
 ) -> float:
     """Buffett owner‑earnings valuation with margin‑of‑safety."""
@@ -199,8 +252,8 @@ def calculate_owner_earnings_value(
 def calculate_intrinsic_value(
     free_cash_flow: float | None,
     growth_rate: float = 0.05,
-    discount_rate: float = 0.10,
-    terminal_growth_rate: float = 0.02,
+    discount_rate: float = 0.09,  # 从10%降到9%
+    terminal_growth_rate: float = 0.025,  # 从2%提高到2.5%
     num_years: int = 5,
 ) -> float:
     """Classic DCF on FCF with constant growth and terminal value."""
@@ -244,8 +297,8 @@ def calculate_residual_income_value(
     net_income: float | None,
     price_to_book_ratio: float | None,
     book_value_growth: float = 0.03,
-    cost_of_equity: float = 0.10,
-    terminal_growth_rate: float = 0.03,
+    cost_of_equity: float = 0.09,  # 从10%降到9%
+    terminal_growth_rate: float = 0.025,  # 从3%降到2.5%
     num_years: int = 5,
 ):
     """Residual Income Model (Edwards‑Bell‑Ohlson)."""
@@ -268,4 +321,4 @@ def calculate_residual_income_value(
     pv_term = term_ri / (1 + cost_of_equity) ** num_years
 
     intrinsic = book_val + pv_ri + pv_term
-    return intrinsic * 0.8  # 20% margin of safety
+    return intrinsic * 0.85  # 15% margin of safety (从20%降到15%)

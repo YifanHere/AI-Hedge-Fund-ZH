@@ -18,6 +18,7 @@ from src.tools.api import (
 )
 from src.utils.llm import call_llm
 from src.utils.progress import progress
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 __all__ = [
     "MichaelBurrySignal",
@@ -59,10 +60,10 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
         # ------------------------------------------------------------------
         # Fetch raw data
         # ------------------------------------------------------------------
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5)
 
-        progress.update_status(agent_id, ticker, "Fetching line items")
+        progress.update_status(agent_id, ticker, "获取财务项目")
         line_items = search_line_items(
             ticker,
             [
@@ -78,13 +79,13 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
             end_date,
         )
 
-        progress.update_status(agent_id, ticker, "Fetching insider trades")
+        progress.update_status(agent_id, ticker, "获取内幕交易数据")
         insider_trades = get_insider_trades(ticker, end_date=end_date, start_date=start_date)
 
-        progress.update_status(agent_id, ticker, "Fetching company news")
+        progress.update_status(agent_id, ticker, "获取公司新闻")
         news = get_company_news(ticker, end_date=end_date, start_date=start_date, limit=250)
 
-        progress.update_status(agent_id, ticker, "Fetching market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
         # ------------------------------------------------------------------
@@ -93,7 +94,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
         progress.update_status(agent_id, ticker, "Analyzing value")
         value_analysis = _analyze_value(metrics, line_items, market_cap)
 
-        progress.update_status(agent_id, ticker, "Analyzing balance sheet")
+        progress.update_status(agent_id, ticker, "分析资产负债表")
         balance_sheet_analysis = _analyze_balance_sheet(metrics, line_items)
 
         progress.update_status(agent_id, ticker, "Analyzing insider activity")
@@ -139,7 +140,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
             "market_cap": market_cap,
         }
 
-        progress.update_status(agent_id, ticker, "Generating LLM output")
+        progress.update_status(agent_id, ticker, "生成AI分析")
         burry_output = _generate_burry_output(
             ticker=ticker,
             analysis_data=analysis_data,
@@ -153,7 +154,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
             "reasoning": burry_output.reasoning,
         }
 
-        progress.update_status(agent_id, ticker, "Done", analysis=burry_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=burry_output.reasoning)
 
     # ----------------------------------------------------------------------
     # Return to the graph
@@ -165,7 +166,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
 
     state["data"]["analyst_signals"][agent_id] = burry_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
@@ -333,11 +334,11 @@ def _generate_burry_output(
 ) -> MichaelBurrySignal:
     """Call the LLM to craft the final trading signal in Burry's voice."""
 
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are an AI agent emulating Dr. Michael J. Burry. Your mandate:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are an AI agent emulating Dr. Michael J. Burry. Your mandate:
                 - Hunt for deep value in US equities using hard numbers (free cash flow, EV/EBIT, balance sheet)
                 - Be contrarian: hatred in the press can be your friend if fundamentals are solid
                 - Focus on downside first – avoid leveraged balance sheets
@@ -353,20 +354,26 @@ def _generate_burry_output(
                 
                 For example, if bullish: "FCF yield 12.8%. EV/EBIT 6.2. Debt-to-equity 0.4. Net insider buying 25k shares. Market missing value due to overreaction to recent litigation. Strong buy."
                 For example, if bearish: "FCF yield only 2.1%. Debt-to-equity concerning at 2.3. Management diluting shareholders. Pass."
-                """,
+                """
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",
-                """Based on the following data, create the investment signal as Michael Burry would:
+                """基于以下数据，以迈克尔·伯里的方式创建投资信号：
 
-                Analysis Data for {ticker}:
+                股票代码 {ticker} 的分析数据：
                 {analysis_data}
 
-                Return the trading signal in the following JSON format exactly:
+                请严格按照以下JSON格式返回交易信号：
                 {{
                   "signal": "bullish" | "bearish" | "neutral",
-                  "confidence": float between 0 and 100,
-                  "reasoning": "string"
+                  "confidence": 0到100之间的浮点数,
+                  "reasoning": "字符串"
                 }}
                 """,
             ),

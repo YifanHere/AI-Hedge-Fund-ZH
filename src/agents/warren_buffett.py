@@ -7,6 +7,7 @@ from typing_extensions import Literal
 from src.tools.api import get_financial_metrics, get_market_cap, search_line_items
 from src.utils.llm import call_llm
 from src.utils.progress import progress
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 
 class WarrenBuffettSignal(BaseModel):
@@ -16,21 +17,21 @@ class WarrenBuffettSignal(BaseModel):
 
 
 def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agent"):
-    """Analyzes stocks using Buffett's principles and LLM reasoning."""
+    """使用巴菲特的原则和LLM推理分析股票。"""
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
 
-    # Collect all analysis for LLM reasoning
+    # 收集所有分析数据用于LLM推理
     analysis_data = {}
     buffett_analysis = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        # Fetch required data - request more periods for better trend analysis
+        progress.update_status(agent_id, ticker, "获取财务指标")
+        # 获取所需数据 - 请求更多期间以进行更好的趋势分析
         metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=10)
 
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         financial_line_items = search_line_items(
             ticker,
             [
@@ -52,58 +53,58 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
             limit=10,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
-        # Get current market cap
+        progress.update_status(agent_id, ticker, "获取市值数据")
+        # 获取当前市值
         market_cap = get_market_cap(ticker, end_date)
 
-        progress.update_status(agent_id, ticker, "Analyzing fundamentals")
-        # Analyze fundamentals
+        progress.update_status(agent_id, ticker, "分析基本面")
+        # 分析基本面
         fundamental_analysis = analyze_fundamentals(metrics)
 
-        progress.update_status(agent_id, ticker, "Analyzing consistency")
+        progress.update_status(agent_id, ticker, "分析一致性")
         consistency_analysis = analyze_consistency(financial_line_items)
 
-        progress.update_status(agent_id, ticker, "Analyzing competitive moat")
+        progress.update_status(agent_id, ticker, "分析竞争护城河")
         moat_analysis = analyze_moat(metrics)
 
-        progress.update_status(agent_id, ticker, "Analyzing pricing power")
+        progress.update_status(agent_id, ticker, "分析定价能力")
         pricing_power_analysis = analyze_pricing_power(financial_line_items, metrics)
 
-        progress.update_status(agent_id, ticker, "Analyzing book value growth")
+        progress.update_status(agent_id, ticker, "分析账面价值增长")
         book_value_analysis = analyze_book_value_growth(financial_line_items)
 
-        progress.update_status(agent_id, ticker, "Analyzing management quality")
+        progress.update_status(agent_id, ticker, "分析管理质量")
         mgmt_analysis = analyze_management_quality(financial_line_items)
 
-        progress.update_status(agent_id, ticker, "Calculating intrinsic value")
+        progress.update_status(agent_id, ticker, "计算内在价值")
         intrinsic_value_analysis = calculate_intrinsic_value(financial_line_items)
 
-        # Calculate total score without circle of competence (LLM will handle that)
+        # 计算总分（不包括能力圈，LLM将处理这个）
         total_score = (
-            fundamental_analysis["score"] + 
-            consistency_analysis["score"] + 
-            moat_analysis["score"] + 
+            fundamental_analysis["score"] +
+            consistency_analysis["score"] +
+            moat_analysis["score"] +
             mgmt_analysis["score"] +
-            pricing_power_analysis["score"] + 
+            pricing_power_analysis["score"] +
             book_value_analysis["score"]
         )
-        
-        # Update max possible score calculation
+
+        # 更新最大可能分数计算
         max_possible_score = (
             10 +  # fundamental_analysis (ROE, debt, margins, current ratio)
-            moat_analysis["max_score"] + 
+            moat_analysis["max_score"] +
             mgmt_analysis["max_score"] +
             5 +   # pricing_power (0-5)
             5     # book_value_growth (0-5)
         )
 
-        # Add margin of safety analysis if we have both intrinsic value and current price
+        # 如果我们有内在价值和当前价格，添加安全边际分析
         margin_of_safety = None
         intrinsic_value = intrinsic_value_analysis["intrinsic_value"]
         if intrinsic_value and market_cap:
             margin_of_safety = (intrinsic_value - market_cap) / market_cap
 
-        # Combine all analysis results for LLM evaluation
+        # 合并所有分析结果用于LLM评估
         analysis_data[ticker] = {
             "ticker": ticker,
             "score": total_score,
@@ -119,7 +120,7 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
             "margin_of_safety": margin_of_safety,
         }
 
-        progress.update_status(agent_id, ticker, "Generating Warren Buffett analysis")
+        progress.update_status(agent_id, ticker, "生成沃伦·巴菲特分析")
         buffett_output = generate_buffett_output(
             ticker=ticker,
             analysis_data=analysis_data,
@@ -127,105 +128,105 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
             agent_id=agent_id,
         )
 
-        # Store analysis in consistent format with other agents
+        # 以与其他代理一致的格式存储分析
         buffett_analysis[ticker] = {
             "signal": buffett_output.signal,
             "confidence": buffett_output.confidence,
             "reasoning": buffett_output.reasoning,
         }
 
-        progress.update_status(agent_id, ticker, "Done", analysis=buffett_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=buffett_output.reasoning)
 
-    # Create the message
+    # 创建消息
     message = HumanMessage(content=json.dumps(buffett_analysis), name=agent_id)
 
-    # Show reasoning if requested
+    # 如果请求，显示推理
     if state["metadata"]["show_reasoning"]:
         show_agent_reasoning(buffett_analysis, agent_id)
 
-    # Add the signal to the analyst_signals list
+    # 将信号添加到分析师信号列表
     state["data"]["analyst_signals"][agent_id] = buffett_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
 
 def analyze_fundamentals(metrics: list) -> dict[str, any]:
-    """Analyze company fundamentals based on Buffett's criteria."""
+    """基于巴菲特的标准分析公司基本面。"""
     if not metrics:
-        return {"score": 0, "details": "Insufficient fundamental data"}
+        return {"score": 0, "details": "基本面数据不足"}
 
     latest_metrics = metrics[0]
 
     score = 0
     reasoning = []
 
-    # Check ROE (Return on Equity)
-    if latest_metrics.return_on_equity and latest_metrics.return_on_equity > 0.15:  # 15% ROE threshold
+    # 检查ROE（股本回报率）
+    if latest_metrics.return_on_equity and latest_metrics.return_on_equity > 0.15:  # 15% ROE阈值
         score += 2
-        reasoning.append(f"Strong ROE of {latest_metrics.return_on_equity:.1%}")
+        reasoning.append(f"强劲的ROE为{latest_metrics.return_on_equity:.1%}")
     elif latest_metrics.return_on_equity:
-        reasoning.append(f"Weak ROE of {latest_metrics.return_on_equity:.1%}")
+        reasoning.append(f"较弱的ROE为{latest_metrics.return_on_equity:.1%}")
     else:
-        reasoning.append("ROE data not available")
+        reasoning.append("ROE数据不可用")
 
-    # Check Debt to Equity
+    # 检查债务股权比
     if latest_metrics.debt_to_equity and latest_metrics.debt_to_equity < 0.5:
         score += 2
-        reasoning.append("Conservative debt levels")
+        reasoning.append("保守的债务水平")
     elif latest_metrics.debt_to_equity:
-        reasoning.append(f"High debt to equity ratio of {latest_metrics.debt_to_equity:.1f}")
+        reasoning.append(f"高债务股权比为{latest_metrics.debt_to_equity:.1f}")
     else:
-        reasoning.append("Debt to equity data not available")
+        reasoning.append("债务股权比数据不可用")
 
-    # Check Operating Margin
+    # 检查营业利润率
     if latest_metrics.operating_margin and latest_metrics.operating_margin > 0.15:
         score += 2
-        reasoning.append("Strong operating margins")
+        reasoning.append("强劲的营业利润率")
     elif latest_metrics.operating_margin:
-        reasoning.append(f"Weak operating margin of {latest_metrics.operating_margin:.1%}")
+        reasoning.append(f"较弱的营业利润率为{latest_metrics.operating_margin:.1%}")
     else:
-        reasoning.append("Operating margin data not available")
+        reasoning.append("营业利润率数据不可用")
 
-    # Check Current Ratio
+    # 检查流动比率
     if latest_metrics.current_ratio and latest_metrics.current_ratio > 1.5:
         score += 1
-        reasoning.append("Good liquidity position")
+        reasoning.append("良好的流动性状况")
     elif latest_metrics.current_ratio:
-        reasoning.append(f"Weak liquidity with current ratio of {latest_metrics.current_ratio:.1f}")
+        reasoning.append(f"流动比率较弱为{latest_metrics.current_ratio:.1f}")
     else:
-        reasoning.append("Current ratio data not available")
+        reasoning.append("流动比率数据不可用")
 
     return {"score": score, "details": "; ".join(reasoning), "metrics": latest_metrics.model_dump()}
 
 
 def analyze_consistency(financial_line_items: list) -> dict[str, any]:
-    """Analyze earnings consistency and growth."""
-    if len(financial_line_items) < 4:  # Need at least 4 periods for trend analysis
-        return {"score": 0, "details": "Insufficient historical data"}
+    """分析盈利一致性和增长。"""
+    if len(financial_line_items) < 4:  # 趋势分析至少需要4个期间
+        return {"score": 0, "details": "历史数据不足"}
 
     score = 0
     reasoning = []
 
-    # Check earnings growth trend
+    # 检查盈利增长趋势
     earnings_values = [item.net_income for item in financial_line_items if item.net_income]
     if len(earnings_values) >= 4:
-        # Simple check: is each period's earnings bigger than the next?
+        # 简单检查：每个期间的盈利是否比下一个更大？
         earnings_growth = all(earnings_values[i] > earnings_values[i + 1] for i in range(len(earnings_values) - 1))
 
         if earnings_growth:
             score += 3
-            reasoning.append("Consistent earnings growth over past periods")
+            reasoning.append("过去期间盈利持续增长")
         else:
-            reasoning.append("Inconsistent earnings growth pattern")
+            reasoning.append("盈利增长模式不一致")
 
-        # Calculate total growth rate from oldest to latest
+        # 计算从最早到最新的总增长率
         if len(earnings_values) >= 2 and earnings_values[-1] != 0:
             growth_rate = (earnings_values[0] - earnings_values[-1]) / abs(earnings_values[-1])
-            reasoning.append(f"Total earnings growth of {growth_rate:.1%} over past {len(earnings_values)} periods")
+            reasoning.append(f"过去{len(earnings_values)}个期间总盈利增长为{growth_rate:.1%}")
     else:
-        reasoning.append("Insufficient earnings data for trend analysis")
+        reasoning.append("趋势分析的盈利数据不足")
 
     return {
         "score": score,
@@ -541,16 +542,16 @@ def calculate_intrinsic_value(financial_line_items: list) -> dict[str, any]:
         conservative_growth = 0.03  # Default conservative growth
     
     # Buffett's conservative assumptions
-    stage1_growth = min(conservative_growth, 0.08)  # Stage 1: cap at 8%
-    stage2_growth = min(conservative_growth * 0.5, 0.04)  # Stage 2: half of stage 1, cap at 4%
+    stage1_growth = min(conservative_growth, 0.12)  # 提高到12%
+    stage2_growth = min(conservative_growth * 0.6, 0.06)  # 提高到6%
     terminal_growth = 0.025  # Long-term GDP growth rate
     
     # Risk-adjusted discount rate based on business quality
-    base_discount_rate = 0.09  # Base 9%
+    base_discount_rate = 0.08  # 降低基准折现率到8%
     
     # Adjust based on analysis scores (if available in calling context)
     # For now, use conservative 10%
-    discount_rate = 0.10
+    discount_rate = 0.09  # 降低到9%
     
     # Three-stage DCF model
     stage1_years = 5   # High growth phase
@@ -738,11 +739,12 @@ def generate_buffett_output(
     agent_id: str = "warren_buffett_agent",
 ) -> WarrenBuffettSignal:
     """Get investment decision from LLM with Buffett's principles"""
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are Warren Buffett, the Oracle of Omaha. Analyze investment opportunities using my proven methodology developed over 60+ years of investing:
+
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are Warren Buffett, the Oracle of Omaha. Analyze investment opportunities using my proven methodology developed over 60+ years of investing:
 
                 MY CORE PRINCIPLES:
                 1. Circle of Competence: "Risk comes from not knowing what you're doing." Only invest in businesses I thoroughly understand.
@@ -797,32 +799,38 @@ def generate_buffett_output(
                 - 10-29%: Poor business or significantly overvalued
 
                 Remember: I'd rather own a wonderful business at a fair price than a fair business at a wonderful price. And when in doubt, the answer is usually "no" - there's no penalty for missed opportunities, only for permanent capital loss.
-                """,
+                """
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",
-                """Analyze this investment opportunity for {ticker}:
+                """分析股票代码 {ticker} 的投资机会：
 
-                COMPREHENSIVE ANALYSIS DATA:
+                综合分析数据：
                 {analysis_data}
 
-                Please provide your investment decision in exactly this JSON format:
+                请严格按照以下JSON格式提供您的投资决策：
                 {{
                   "signal": "bullish" | "bearish" | "neutral",
-                  "confidence": float between 0 and 100,
-                  "reasoning": "string with your detailed Warren Buffett-style analysis"
+                  "confidence": 0到100之间的浮点数,
+                  "reasoning": "详细的巴菲特风格分析字符串"
                 }}
 
-                In your reasoning, be specific about:
-                1. Whether this falls within your circle of competence and why (CRITICAL FIRST STEP)
-                2. Your assessment of the business's competitive moat
-                3. Management quality and capital allocation
-                4. Financial health and consistency
-                5. Valuation relative to intrinsic value
-                6. Long-term prospects and any red flags
-                7. How this compares to opportunities in your portfolio
+                在您的推理中，请具体说明：
+                1. 这是否属于您的能力圈范围以及原因（关键第一步）
+                2. 您对企业竞争护城河的评估
+                3. 管理质量和资本配置
+                4. 财务健康状况和一致性
+                5. 相对于内在价值的估值
+                6. 长期前景和任何危险信号
+                7. 与您投资组合中的机会相比如何
 
-                Write as Warren Buffett would speak - plainly, with conviction, and with specific references to the data provided.
+                请以沃伦·巴菲特的风格写作——朴实、有说服力，并具体引用所提供的数据。
                 """,
             ),
         ]

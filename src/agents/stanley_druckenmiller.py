@@ -14,6 +14,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 import statistics
 
 
@@ -42,10 +43,10 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
     druck_analysis = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5)
 
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         # Include relevant line items for Stan Druckenmiller's approach:
         #   - Growth & momentum: revenue, EPS, operating_income, ...
         #   - Valuation: net_income, free_cash_flow, ebit, ebitda
@@ -74,31 +75,31 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
             limit=5,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
-        progress.update_status(agent_id, ticker, "Fetching insider trades")
+        progress.update_status(agent_id, ticker, "获取内幕交易数据")
         insider_trades = get_insider_trades(ticker, end_date, start_date=None, limit=50)
 
-        progress.update_status(agent_id, ticker, "Fetching company news")
+        progress.update_status(agent_id, ticker, "获取公司新闻")
         company_news = get_company_news(ticker, end_date, start_date=None, limit=50)
 
-        progress.update_status(agent_id, ticker, "Fetching recent price data for momentum")
+        progress.update_status(agent_id, ticker, "获取动量分析价格数据")
         prices = get_prices(ticker, start_date=start_date, end_date=end_date)
 
-        progress.update_status(agent_id, ticker, "Analyzing growth & momentum")
+        progress.update_status(agent_id, ticker, "分析增长与势头")
         growth_momentum_analysis = analyze_growth_and_momentum(financial_line_items, prices)
 
-        progress.update_status(agent_id, ticker, "Analyzing sentiment")
+        progress.update_status(agent_id, ticker, "分析市场情绪")
         sentiment_analysis = analyze_sentiment(company_news)
 
-        progress.update_status(agent_id, ticker, "Analyzing insider activity")
+        progress.update_status(agent_id, ticker, "分析内幕活动")
         insider_activity = analyze_insider_activity(insider_trades)
 
-        progress.update_status(agent_id, ticker, "Analyzing risk-reward")
+        progress.update_status(agent_id, ticker, "分析风险回报")
         risk_reward_analysis = analyze_risk_reward(financial_line_items, prices)
 
-        progress.update_status(agent_id, ticker, "Performing Druckenmiller-style valuation")
+        progress.update_status(agent_id, ticker, "进行德鲁肯米勒式估值")
         valuation_analysis = analyze_druckenmiller_valuation(financial_line_items, market_cap)
 
         # Combine partial scores with weights typical for Druckenmiller:
@@ -133,7 +134,7 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
             "valuation_analysis": valuation_analysis,
         }
 
-        progress.update_status(agent_id, ticker, "Generating Stanley Druckenmiller analysis")
+        progress.update_status(agent_id, ticker, "生成斯坦利·德鲁肯米勒分析")
         druck_output = generate_druckenmiller_output(
             ticker=ticker,
             analysis_data=analysis_data,
@@ -147,7 +148,7 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
             "reasoning": druck_output.reasoning,
         }
 
-        progress.update_status(agent_id, ticker, "Done", analysis=druck_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=druck_output.reasoning)
 
     # Wrap results in a single message
     message = HumanMessage(content=json.dumps(druck_analysis), name=agent_id)
@@ -157,7 +158,7 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
 
     state["data"]["analyst_signals"][agent_id] = druck_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
     
     return {"messages": [message], "data": state["data"]}
 
@@ -363,20 +364,27 @@ def analyze_risk_reward(financial_line_items: list, prices: list) -> dict:
     equity_values = [fi.shareholders_equity for fi in financial_line_items if fi.shareholders_equity is not None]
 
     if debt_values and equity_values and len(debt_values) == len(equity_values) and len(debt_values) > 0:
-        recent_debt = debt_values[0]
-        recent_equity = equity_values[0] if equity_values[0] else 1e-9
-        de_ratio = recent_debt / recent_equity
-        if de_ratio < 0.3:
-            raw_score += 3
-            details.append(f"Low debt-to-equity: {de_ratio:.2f}")
-        elif de_ratio < 0.7:
-            raw_score += 2
-            details.append(f"Moderate debt-to-equity: {de_ratio:.2f}")
-        elif de_ratio < 1.5:
-            raw_score += 1
-            details.append(f"Somewhat high debt-to-equity: {de_ratio:.2f}")
+        recent_debt = debt_values[0] if debt_values[0] is not None else 0
+        recent_equity = equity_values[0] if equity_values[0] is not None else None
+
+        if recent_equity is not None and abs(recent_equity) > 1e-9:
+            de_ratio = recent_debt / recent_equity
         else:
-            details.append(f"High debt-to-equity: {de_ratio:.2f}")
+            # Skip D/E calculation if equity is None or near zero
+            details.append("Equity is zero or unavailable; skipping D/E calculation.")
+            de_ratio = None
+        if de_ratio is not None:
+            if de_ratio < 0.3:
+                raw_score += 3
+                details.append(f"Low debt-to-equity: {de_ratio:.2f}")
+            elif de_ratio < 0.7:
+                raw_score += 2
+                details.append(f"Moderate debt-to-equity: {de_ratio:.2f}")
+            elif de_ratio < 1.5:
+                raw_score += 1
+                details.append(f"Somewhat high debt-to-equity: {de_ratio:.2f}")
+            else:
+                details.append(f"High debt-to-equity: {de_ratio:.2f}")
     else:
         details.append("No consistent debt/equity data available.")
 
@@ -445,6 +453,10 @@ def analyze_druckenmiller_valuation(financial_line_items: list, market_cap: floa
     recent_cash = cash_values[0] if cash_values else 0
 
     enterprise_value = market_cap + recent_debt - recent_cash
+
+    # Ensure enterprise value is positive for meaningful ratios
+    if enterprise_value <= 0:
+        enterprise_value = market_cap  # Fallback to market cap if EV is negative
 
     # 1) P/E
     recent_net_income = net_incomes[0] if net_incomes else None
@@ -530,25 +542,26 @@ def generate_druckenmiller_output(
     """
     Generates a JSON signal in the style of Stanley Druckenmiller.
     """
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-              "system",
-              """You are a Stanley Druckenmiller AI agent, making investment decisions using his principles:
-            
+
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Stanley Druckenmiller AI agent, making investment decisions using his principles:
+
               1. Seek asymmetric risk-reward opportunities (large upside, limited downside).
               2. Emphasize growth, momentum, and market sentiment.
               3. Preserve capital by avoiding major drawdowns.
               4. Willing to pay higher valuations for true growth leaders.
               5. Be aggressive when conviction is high.
               6. Cut losses quickly if the thesis changes.
-                            
+
               Rules:
               - Reward companies showing strong revenue/earnings growth and positive stock momentum.
               - Evaluate sentiment and insider activity as supportive or contradictory signals.
               - Watch out for high leverage or extreme volatility that threatens capital.
               - Output a JSON object with signal, confidence, and a reasoning string.
-              
+
               When providing your reasoning, be thorough and specific by:
               1. Explaining the growth and momentum metrics that most influenced your decision
               2. Highlighting the risk-reward profile with specific numerical evidence
@@ -556,10 +569,15 @@ def generate_druckenmiller_output(
               4. Addressing both upside potential and downside risks
               5. Providing specific valuation context relative to growth prospects
               6. Using Stanley Druckenmiller's decisive, momentum-focused, and conviction-driven voice
-              
+
               For example, if bullish: "The company shows exceptional momentum with revenue accelerating from 22% to 35% YoY and the stock up 28% over the past three months. Risk-reward is highly asymmetric with 70% upside potential based on FCF multiple expansion and only 15% downside risk given the strong balance sheet with 3x cash-to-debt. Insider buying and positive market sentiment provide additional tailwinds..."
-              For example, if bearish: "Despite recent stock momentum, revenue growth has decelerated from 30% to 12% YoY, and operating margins are contracting. The risk-reward proposition is unfavorable with limited 10% upside potential against 40% downside risk. The competitive landscape is intensifying, and insider selling suggests waning confidence. I'm seeing better opportunities elsewhere with more favorable setups..."
-              """,
+              For example, if bearish: "Despite recent stock momentum, revenue growth has decelerated from 30% to 12% YoY, and operating margins are contracting. The risk-reward proposition is unfavorable with limited 10% upside potential against 40% downside risk. The competitive landscape is intensifying, and insider selling suggests waning confidence. I'm seeing better opportunities elsewhere with more favorable setups..."""
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+              "system",
+              system_prompt,
             ),
             (
               "human",

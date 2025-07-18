@@ -1,4 +1,4 @@
-"""Utilities for working with Ollama models"""
+"""使用Ollama模型的工具"""
 
 import platform
 import subprocess
@@ -9,8 +9,9 @@ import questionary
 from colorama import Fore, Style
 import os
 from . import docker
+from .i18n import _
 
-# Constants
+# 常量
 OLLAMA_SERVER_URL = "http://localhost:11434"
 OLLAMA_API_MODELS_ENDPOINT = f"{OLLAMA_SERVER_URL}/api/tags"
 OLLAMA_DOWNLOAD_URL = {"darwin": "https://ollama.com/download/darwin", "windows": "https://ollama.com/download/windows", "linux": "https://ollama.com/download/linux"}  # macOS  # Windows  # Linux
@@ -18,10 +19,10 @@ INSTALLATION_INSTRUCTIONS = {"darwin": "curl -fsSL https://ollama.com/install.sh
 
 
 def is_ollama_installed() -> bool:
-    """Check if Ollama is installed on the system."""
+    """检查系统上是否安装了Ollama。"""
     system = platform.system().lower()
 
-    if system == "darwin" or system == "linux":  # macOS or Linux
+    if system == "darwin" or system == "linux":  # macOS或Linux
         try:
             result = subprocess.run(["which", "ollama"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             return result.returncode == 0
@@ -34,11 +35,11 @@ def is_ollama_installed() -> bool:
         except Exception:
             return False
     else:
-        return False  # Unsupported OS
+        return False  # 不支持的操作系统
 
 
 def is_ollama_server_running() -> bool:
-    """Check if the Ollama server is running."""
+    """检查Ollama服务器是否正在运行。"""
     try:
         response = requests.get(OLLAMA_API_MODELS_ENDPOINT, timeout=2)
         return response.status_code == 200
@@ -47,7 +48,7 @@ def is_ollama_server_running() -> bool:
 
 
 def get_locally_available_models() -> List[str]:
-    """Get a list of models that are already downloaded locally."""
+    """获取已在本地下载的模型列表。"""
     if not is_ollama_server_running():
         return []
 
@@ -62,124 +63,124 @@ def get_locally_available_models() -> List[str]:
 
 
 def start_ollama_server() -> bool:
-    """Start the Ollama server if it's not already running."""
+    """如果Ollama服务器尚未运行，则启动它。"""
     if is_ollama_server_running():
-        print(f"{Fore.GREEN}Ollama server is already running.{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}Ollama服务器已在运行。{Style.RESET_ALL}")
         return True
 
     system = platform.system().lower()
 
     try:
-        if system == "darwin" or system == "linux":  # macOS or Linux
+        if system == "darwin" or system == "linux":  # macOS或Linux
             subprocess.Popen(["ollama", "serve"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         elif system == "windows":  # Windows
             subprocess.Popen(["ollama", "serve"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         else:
-            print(f"{Fore.RED}Unsupported operating system: {system}{Style.RESET_ALL}")
+            print(f"{Fore.RED}不支持的操作系统：{system}{Style.RESET_ALL}")
             return False
 
-        # Wait for server to start
-        for _ in range(10):  # Try for 10 seconds
+        # 等待服务器启动
+        for _ in range(10):  # 尝试10秒
             if is_ollama_server_running():
-                print(f"{Fore.GREEN}Ollama server started successfully.{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}Ollama服务器启动成功。{Style.RESET_ALL}")
                 return True
             time.sleep(1)
 
-        print(f"{Fore.RED}Failed to start Ollama server. Timed out waiting for server to become available.{Style.RESET_ALL}")
+        print(f"{Fore.RED}启动Ollama服务器失败。等待服务器可用超时。{Style.RESET_ALL}")
         return False
     except Exception as e:
-        print(f"{Fore.RED}Error starting Ollama server: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}启动Ollama服务器时出错：{e}{Style.RESET_ALL}")
         return False
 
 
 def install_ollama() -> bool:
-    """Install Ollama on the system."""
+    """在系统上安装Ollama。"""
     system = platform.system().lower()
     if system not in OLLAMA_DOWNLOAD_URL:
-        print(f"{Fore.RED}Unsupported operating system for automatic installation: {system}{Style.RESET_ALL}")
-        print(f"Please visit https://ollama.com/download to install Ollama manually.")
+        print(f"{Fore.RED}不支持在{system}系统上自动安装{Style.RESET_ALL}")
+        print(f"{_('Please visit https://ollama.com/download to install Ollama manually.')}")
         return False
 
     if system == "darwin":  # macOS
-        print(f"{Fore.YELLOW}Ollama for Mac is available as an application download.{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{_('Ollama for Mac is available as an application download.')}{Style.RESET_ALL}")
 
         # Default to offering the app download first for macOS users
-        if questionary.confirm("Would you like to download the Ollama application?", default=True).ask():
+        if questionary.confirm(_("Would you like to download the Ollama application?"), default=True).ask():
             try:
                 import webbrowser
 
                 webbrowser.open(OLLAMA_DOWNLOAD_URL["darwin"])
-                print(f"{Fore.YELLOW}Please download and install the application, then restart this program.{Style.RESET_ALL}")
-                print(f"{Fore.CYAN}After installation, you may need to open the Ollama app once before continuing.{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}{_('Please download and install the application, then restart this program.')}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}{_('After installation, you may need to open the Ollama app once before continuing.')}{Style.RESET_ALL}")
 
                 # Ask if they want to try continuing after installation
-                if questionary.confirm("Have you installed the Ollama app and opened it at least once?", default=False).ask():
+                if questionary.confirm(_("Have you installed the Ollama app and opened it at least once?"), default=False).ask():
                     # Check if it's now installed
                     if is_ollama_installed() and start_ollama_server():
-                        print(f"{Fore.GREEN}Ollama is now properly installed and running!{Style.RESET_ALL}")
+                        print(f"{Fore.GREEN}{_('Ollama is now properly installed and running!')}{Style.RESET_ALL}")
                         return True
                     else:
-                        print(f"{Fore.RED}Ollama installation not detected. Please restart this application after installing Ollama.{Style.RESET_ALL}")
+                        print(f"{Fore.RED}{_('Ollama installation not detected. Please restart this application after installing Ollama.')}{Style.RESET_ALL}")
                         return False
                 return False
             except Exception as e:
-                print(f"{Fore.RED}Failed to open browser: {e}{Style.RESET_ALL}")
+                print(f"{Fore.RED}{_('Failed to open browser:')}: {e}{Style.RESET_ALL}")
                 return False
         else:
             # Only offer command-line installation as a fallback for advanced users
-            if questionary.confirm("Would you like to try the command-line installation instead? (For advanced users)", default=False).ask():
-                print(f"{Fore.YELLOW}Attempting command-line installation...{Style.RESET_ALL}")
+            if questionary.confirm(_("Would you like to try the command-line installation instead? (For advanced users)"), default=False).ask():
+                print(f"{Fore.YELLOW}{_('Attempting command-line installation...')}{Style.RESET_ALL}")
                 try:
                     install_process = subprocess.run(["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
                     if install_process.returncode == 0:
-                        print(f"{Fore.GREEN}Ollama installed successfully via command line.{Style.RESET_ALL}")
+                        print(f"{Fore.GREEN}{_('Ollama installed successfully via command line.')}{Style.RESET_ALL}")
                         return True
                     else:
-                        print(f"{Fore.RED}Command-line installation failed. Please use the app download method instead.{Style.RESET_ALL}")
+                        print(f"{Fore.RED}{_('Command-line installation failed. Please use the app download method instead.')}{Style.RESET_ALL}")
                         return False
                 except Exception as e:
-                    print(f"{Fore.RED}Error during command-line installation: {e}{Style.RESET_ALL}")
+                    print(f"{Fore.RED}{_('Error during command-line installation:')}: {e}{Style.RESET_ALL}")
                     return False
             return False
     elif system == "linux":  # Linux
-        print(f"{Fore.YELLOW}Installing Ollama...{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{_('Installing Ollama...')}{Style.RESET_ALL}")
         try:
             # Run the installation command as a single command
             install_process = subprocess.run(["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
             if install_process.returncode == 0:
-                print(f"{Fore.GREEN}Ollama installed successfully.{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}{_('Ollama installed successfully.')}{Style.RESET_ALL}")
                 return True
             else:
-                print(f"{Fore.RED}Failed to install Ollama. Error: {install_process.stderr}{Style.RESET_ALL}")
+                print(f"{Fore.RED}{_('Failed to install Ollama. Error:')}: {install_process.stderr}{Style.RESET_ALL}")
                 return False
         except Exception as e:
-            print(f"{Fore.RED}Error during Ollama installation: {e}{Style.RESET_ALL}")
+            print(f"{Fore.RED}{_('Error during Ollama installation:')}: {e}{Style.RESET_ALL}")
             return False
     elif system == "windows":  # Windows
-        print(f"{Fore.YELLOW}Automatic installation on Windows is not supported.{Style.RESET_ALL}")
-        print(f"Please download and install Ollama from: {OLLAMA_DOWNLOAD_URL['windows']}")
+        print(f"{Fore.YELLOW}{_('Automatic installation on Windows is not supported.')}{Style.RESET_ALL}")
+        print(f"{_('Please download and install Ollama from:')}: {OLLAMA_DOWNLOAD_URL['windows']}")
 
         # Ask if they want to open the download page
-        if questionary.confirm("Do you want to open the Ollama download page in your browser?").ask():
+        if questionary.confirm(_("Do you want to open the Ollama download page in your browser?")).ask():
             try:
                 import webbrowser
 
                 webbrowser.open(OLLAMA_DOWNLOAD_URL["windows"])
-                print(f"{Fore.YELLOW}After installation, please restart this application.{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}{_('After installation, please restart this application.')}{Style.RESET_ALL}")
 
                 # Ask if they want to try continuing after installation
-                if questionary.confirm("Have you installed Ollama?", default=False).ask():
+                if questionary.confirm(_("Have you installed Ollama?"), default=False).ask():
                     # Check if it's now installed
                     if is_ollama_installed() and start_ollama_server():
-                        print(f"{Fore.GREEN}Ollama is now properly installed and running!{Style.RESET_ALL}")
+                        print(f"{Fore.GREEN}{_('Ollama is now properly installed and running!')}{Style.RESET_ALL}")
                         return True
                     else:
-                        print(f"{Fore.RED}Ollama installation not detected. Please restart this application after installing Ollama.{Style.RESET_ALL}")
+                        print(f"{Fore.RED}{_('Ollama installation not detected. Please restart this application after installing Ollama.')}{Style.RESET_ALL}")
                         return False
             except Exception as e:
-                print(f"{Fore.RED}Failed to open browser: {e}{Style.RESET_ALL}")
+                print(f"{Fore.RED}{_('Failed to open browser:')}: {e}{Style.RESET_ALL}")
         return False
 
     return False
@@ -191,9 +192,9 @@ def download_model(model_name: str) -> bool:
         if not start_ollama_server():
             return False
 
-    print(f"{Fore.YELLOW}Downloading model {model_name}...{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}This may take a while depending on your internet speed and the model size.{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}The download is happening in the background. Please be patient...{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{_('Downloading model')} {model_name}...{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{_('This may take a while depending on your internet speed and the model size.')}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{_('The download is happening in the background. Please be patient...')}{Style.RESET_ALL}")
 
     try:
         # Use the Ollama CLI to download the model

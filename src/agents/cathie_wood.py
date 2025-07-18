@@ -7,6 +7,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 
 class CathieWoodSignal(BaseModel):
@@ -31,10 +32,10 @@ def cathie_wood_agent(state: AgentState, agent_id: str = "cathie_wood_agent"):
     cw_analysis = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5)
 
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         # Request multiple periods of data (annual or TTM) for a more robust view.
         financial_line_items = search_line_items(
             ticker,
@@ -57,7 +58,7 @@ def cathie_wood_agent(state: AgentState, agent_id: str = "cathie_wood_agent"):
             limit=5,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
         progress.update_status(agent_id, ticker, "Analyzing disruptive potential")
@@ -82,7 +83,7 @@ def cathie_wood_agent(state: AgentState, agent_id: str = "cathie_wood_agent"):
 
         analysis_data[ticker] = {"signal": signal, "score": total_score, "max_score": max_possible_score, "disruptive_analysis": disruptive_analysis, "innovation_analysis": innovation_analysis, "valuation_analysis": valuation_analysis}
 
-        progress.update_status(agent_id, ticker, "Generating Cathie Wood analysis")
+        progress.update_status(agent_id, ticker, "生成凯茜·伍德分析")
         cw_output = generate_cathie_wood_output(
             ticker=ticker,
             analysis_data=analysis_data,
@@ -92,7 +93,7 @@ def cathie_wood_agent(state: AgentState, agent_id: str = "cathie_wood_agent"):
 
         cw_analysis[ticker] = {"signal": cw_output.signal, "confidence": cw_output.confidence, "reasoning": cw_output.reasoning}
 
-        progress.update_status(agent_id, ticker, "Done", analysis=cw_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=cw_output.reasoning)
 
     message = HumanMessage(content=json.dumps(cw_analysis), name=agent_id)
 
@@ -101,7 +102,7 @@ def cathie_wood_agent(state: AgentState, agent_id: str = "cathie_wood_agent"):
 
     state["data"]["analyst_signals"][agent_id] = cw_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
@@ -367,11 +368,11 @@ def generate_cathie_wood_output(
     """
     Generates investment decisions in the style of Cathie Wood.
     """
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are a Cathie Wood AI agent, making investment decisions using her principles:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Cathie Wood AI agent, making investment decisions using her principles:
 
             1. Seek companies leveraging disruptive innovation.
             2. Emphasize exponential growth potential, large TAM.
@@ -397,20 +398,26 @@ def generate_cathie_wood_output(
             
             For example, if bullish: "The company's AI-driven platform is transforming the $500B healthcare analytics market, with evidence of platform adoption accelerating from 40% to 65% YoY. Their R&D investments of 22% of revenue are creating a technological moat that positions them to capture a significant share of this expanding market. The current valuation doesn't reflect the exponential growth trajectory we expect as..."
             For example, if bearish: "While operating in the genomics space, the company lacks truly disruptive technology and is merely incrementally improving existing techniques. R&D spending at only 8% of revenue signals insufficient investment in breakthrough innovation. With revenue growth slowing from 45% to 20% YoY, there's limited evidence of the exponential adoption curve we look for in transformative companies..."
-            """,
+            """
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",
-                """Based on the following analysis, create a Cathie Wood-style investment signal.
+                """基于以下分析，创建凯茜·伍德风格的投资信号。
 
-            Analysis Data for {ticker}:
+            股票代码 {ticker} 的分析数据：
             {analysis_data}
 
-            Return the trading signal in this JSON format:
+            请按照以下JSON格式返回交易信号：
             {{
               "signal": "bullish/bearish/neutral",
-              "confidence": float (0-100),
-              "reasoning": "string"
+              "confidence": 浮点数 (0-100),
+              "reasoning": "字符串"
             }}
             """,
             ),

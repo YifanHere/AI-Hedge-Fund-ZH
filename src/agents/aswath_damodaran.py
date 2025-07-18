@@ -15,6 +15,7 @@ from src.tools.api import (
 )
 from src.utils.llm import call_llm
 from src.utils.progress import progress
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 
 
 class AswathDamodaranSignal(BaseModel):
@@ -41,10 +42,10 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
 
     for ticker in tickers:
         # ─── Fetch core data ────────────────────────────────────────────────────
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5)
 
-        progress.update_status(agent_id, ticker, "Fetching financial line items")
+        progress.update_status(agent_id, ticker, "获取财务项目")
         line_items = search_line_items(
             ticker,
             [
@@ -60,7 +61,7 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
             end_date,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
         # ─── Analyses ───────────────────────────────────────────────────────────
@@ -122,7 +123,7 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
 
         damodaran_signals[ticker] = damodaran_output.model_dump()
 
-        progress.update_status(agent_id, ticker, "Done", analysis=damodaran_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=damodaran_output.reasoning)
 
     # ─── Push message back to graph state ──────────────────────────────────────
     message = HumanMessage(content=json.dumps(damodaran_signals), name=agent_id)
@@ -131,7 +132,7 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
         show_agent_reasoning(damodaran_signals, "Aswath Damodaran Agent")
 
     state["data"]["analyst_signals"][agent_id] = damodaran_signals
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
@@ -369,11 +370,11 @@ def generate_damodaran_output(
       • Emphasize risk, growth, and cash-flow assumptions
       • Cite cost of capital, implied MOS, and valuation cross-checks
     """
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are Aswath Damodaran, Professor of Finance at NYU Stern.
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are Aswath Damodaran, Professor of Finance at NYU Stern.
                 Use your valuation framework to issue trading signals on US equities.
 
                 Speak with your usual clear, data-driven tone:
@@ -381,20 +382,26 @@ def generate_damodaran_output(
                   ◦ Connect that story to key numerical drivers: revenue growth, margins, reinvestment, risk
                   ◦ Conclude with value: your FCFF DCF estimate, margin of safety, and relative valuation sanity checks
                   ◦ Highlight major uncertainties and how they affect value
-                Return ONLY the JSON specified below.""",
+                Return ONLY the JSON specified below."""
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",
-                """Ticker: {ticker}
+                """股票代码: {ticker}
 
-                Analysis data:
+                分析数据:
                 {analysis_data}
 
-                Respond EXACTLY in this JSON schema:
+                请严格按照以下JSON格式响应:
                 {{
                   "signal": "bullish" | "bearish" | "neutral",
-                  "confidence": float (0-100),
-                  "reasoning": "string"
+                  "confidence": 浮点数 (0-100),
+                  "reasoning": "字符串"
                 }}""",
             ),
         ]

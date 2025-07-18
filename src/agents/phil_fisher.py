@@ -13,6 +13,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 import statistics
 
 
@@ -42,10 +43,10 @@ def phil_fisher_agent(state: AgentState, agent_id: str = "phil_fisher_agent"):
     fisher_analysis = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5)
 
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         # Include relevant line items for Phil Fisher's approach:
         #   - Growth & Quality: revenue, net_income, earnings_per_share, R&D expense
         #   - Margins & Stability: operating_income, operating_margin, gross_margin
@@ -73,13 +74,13 @@ def phil_fisher_agent(state: AgentState, agent_id: str = "phil_fisher_agent"):
             limit=5,
         )
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
-        progress.update_status(agent_id, ticker, "Fetching insider trades")
+        progress.update_status(agent_id, ticker, "获取内幕交易数据")
         insider_trades = get_insider_trades(ticker, end_date, start_date=None, limit=50)
 
-        progress.update_status(agent_id, ticker, "Fetching company news")
+        progress.update_status(agent_id, ticker, "获取公司新闻")
         company_news = get_company_news(ticker, end_date, start_date=None, limit=50)
 
         progress.update_status(agent_id, ticker, "Analyzing growth & quality")
@@ -97,7 +98,7 @@ def phil_fisher_agent(state: AgentState, agent_id: str = "phil_fisher_agent"):
         progress.update_status(agent_id, ticker, "Analyzing insider activity")
         insider_activity = analyze_insider_activity(insider_trades)
 
-        progress.update_status(agent_id, ticker, "Analyzing sentiment")
+        progress.update_status(agent_id, ticker, "分析市场情绪")
         sentiment_analysis = analyze_sentiment(company_news)
 
         # Combine partial scores with weights typical for Fisher:
@@ -152,7 +153,7 @@ def phil_fisher_agent(state: AgentState, agent_id: str = "phil_fisher_agent"):
             "reasoning": fisher_output.reasoning,
         }
 
-        progress.update_status(agent_id, ticker, "Done", analysis=fisher_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=fisher_output.reasoning)
 
     # Wrap results in a single message
     message = HumanMessage(content=json.dumps(fisher_analysis), name=agent_id)
@@ -162,7 +163,7 @@ def phil_fisher_agent(state: AgentState, agent_id: str = "phil_fisher_agent"):
 
     state["data"]["analyst_signals"][agent_id] = fisher_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
     
     return {"messages": [message], "data": state["data"]}
 
@@ -536,11 +537,11 @@ def generate_fisher_output(
     """
     Generates a JSON signal in the style of Phil Fisher.
     """
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-              "system",
-              """You are a Phil Fisher AI agent, making investment decisions using his principles:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Phil Fisher AI agent, making investment decisions using his principles:
   
               1. Emphasize long-term growth potential and quality of management.
               2. Focus on companies investing in R&D for future products/services.
@@ -564,20 +565,26 @@ def generate_fisher_output(
                 - "signal": "bullish" or "bearish" or "neutral"
                 - "confidence": a float between 0 and 100
                 - "reasoning": a detailed explanation
-              """,
+              """
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+              "system",
+              system_prompt,
             ),
             (
               "human",
-              """Based on the following analysis, create a Phil Fisher-style investment signal.
+              """基于以下分析，创建费雪风格的投资信号。
 
-              Analysis Data for {ticker}:
+              股票代码 {ticker} 的分析数据：
               {analysis_data}
 
-              Return the trading signal in this JSON format:
+              请按照以下JSON格式返回交易信号：
               {{
                 "signal": "bullish/bearish/neutral",
-                "confidence": float (0-100),
-                "reasoning": "string"
+                "confidence": 浮点数 (0-100),
+                "reasoning": "字符串"
               }}
               """,
             ),

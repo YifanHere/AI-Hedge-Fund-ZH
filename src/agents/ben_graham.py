@@ -7,6 +7,7 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.llm import call_llm
+from src.utils.analyst_prompts_zh import get_analyst_prompt_zh, should_use_chinese_prompt
 import math
 
 
@@ -32,13 +33,13 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
     graham_analysis = {}
 
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Fetching financial metrics")
+        progress.update_status(agent_id, ticker, "获取财务指标")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10)
 
-        progress.update_status(agent_id, ticker, "Gathering financial line items")
+        progress.update_status(agent_id, ticker, "收集财务项目")
         financial_line_items = search_line_items(ticker, ["earnings_per_share", "revenue", "net_income", "book_value_per_share", "total_assets", "total_liabilities", "current_assets", "current_liabilities", "dividends_and_other_cash_distributions", "outstanding_shares"], end_date, period="annual", limit=10)
 
-        progress.update_status(agent_id, ticker, "Getting market cap")
+        progress.update_status(agent_id, ticker, "获取市值数据")
         market_cap = get_market_cap(ticker, end_date)
 
         # Perform sub-analyses
@@ -65,7 +66,7 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
 
         analysis_data[ticker] = {"signal": signal, "score": total_score, "max_score": max_possible_score, "earnings_analysis": earnings_analysis, "strength_analysis": strength_analysis, "valuation_analysis": valuation_analysis}
 
-        progress.update_status(agent_id, ticker, "Generating Ben Graham analysis")
+        progress.update_status(agent_id, ticker, "生成本杰明·格雷厄姆分析")
         graham_output = generate_graham_output(
             ticker=ticker,
             analysis_data=analysis_data,
@@ -75,7 +76,7 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
 
         graham_analysis[ticker] = {"signal": graham_output.signal, "confidence": graham_output.confidence, "reasoning": graham_output.reasoning}
 
-        progress.update_status(agent_id, ticker, "Done", analysis=graham_output.reasoning)
+        progress.update_status(agent_id, ticker, "完成", analysis=graham_output.reasoning)
 
     # Wrap results in a single message for the chain
     message = HumanMessage(content=json.dumps(graham_analysis), name=agent_id)
@@ -87,7 +88,7 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
     # Store signals in the overall state
     state["data"]["analyst_signals"][agent_id] = graham_analysis
 
-    progress.update_status(agent_id, None, "Done")
+    progress.update_status(agent_id, None, "完成")
 
     return {"messages": [message], "data": state["data"]}
 
@@ -289,11 +290,11 @@ def generate_graham_output(
     - Return the result in a JSON structure: { signal, confidence, reasoning }.
     """
 
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """You are a Benjamin Graham AI agent, making investment decisions using his principles:
+    # 检查是否使用中文提示词
+    if should_use_chinese_prompt(agent_id):
+        system_prompt = get_analyst_prompt_zh(agent_id)
+    else:
+        system_prompt = """You are a Benjamin Graham AI agent, making investment decisions using his principles:
             1. Insist on a margin of safety by buying below intrinsic value (e.g., using Graham Number, net-net).
             2. Emphasize the company's financial strength (low leverage, ample current assets).
             3. Prefer stable earnings over multiple years.
@@ -312,20 +313,26 @@ def generate_graham_output(
             For example, if bearish: "Despite consistent earnings, the current price of $50 exceeds our calculated Graham Number of $35, offering no margin of safety. Additionally, the current ratio of only 1.2 falls below Graham's preferred 2.0 threshold..."
                         
             Return a rational recommendation: bullish, bearish, or neutral, with a confidence level (0-100) and thorough reasoning.
-            """,
+            """
+
+    template = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
             ),
             (
                 "human",
-                """Based on the following analysis, create a Graham-style investment signal:
+                """基于以下分析，创建格雷厄姆风格的投资信号：
 
-            Analysis Data for {ticker}:
+            股票代码 {ticker} 的分析数据：
             {analysis_data}
 
-            Return JSON exactly in this format:
+            请严格按照以下JSON格式返回：
             {{
-              "signal": "bullish" or "bearish" or "neutral",
-              "confidence": float (0-100),
-              "reasoning": "string"
+              "signal": "bullish" 或 "bearish" 或 "neutral",
+              "confidence": 浮点数 (0-100),
+              "reasoning": "字符串"
             }}
             """,
             ),
